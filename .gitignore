@@ -1,0 +1,42 @@
+# Python venv & cache
+pepper-py/.venv/
+pepper-py/__pycache__/
+pepper-py/**/__pycache__/
+pepper-py/**/*.pyc
+pepper-py/*.egg-info/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# SQLite runtime data
+*.db
+*.db-shm
+*.db-wal
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Secrets / runtime
+.env
+.env.local
+*.secret
+seen.json
+output/
+logs/
+.playwright-mcp/
+.serena/
+
+# Generated covers (runtime output, not source)
+images/*.png
+images/*.jpg
+
+# uv lock is fine to commit, but exclude dist
+pepper-py/dist/
+.gstack/
+
+# Cookies / credentials (NEVER commit)
+secrets/
+secrets/**
+*.cookies.json
+*.bak_*

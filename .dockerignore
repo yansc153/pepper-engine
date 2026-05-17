@@ -1,0 +1,43 @@
+# VCS
+.git/
+.gitignore
+.github/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+.env.local
+.env.*.local
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Runtime artifacts (mounted as volumes at runtime, never baked in)
+data/
+logs/
+tmp_images/
+tmp_*/
+pepperbot.log
+
+# Secrets MUST never be baked into the image — mounted via volume instead
+secrets/
+
+# Docs / dev clutter we do not need inside the container
+docs/archive/
+*.md.bak
+.DS_Store
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Node (if any tooling sneaks in)
+node_modules/

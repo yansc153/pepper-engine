@@ -1,0 +1,14 @@
+{
+  "hook_pattern": "反共识开场",
+  "hook_example": "今天所有人都看好新能源 但有个细节没人提",
+  "syntax_signature": "short_comma_no_period",
+  "sentence_len_avg": 18,
+  "sentence_len_p90": 26,
+  "stance_strength": 4,
+  "emotion_triggers": ["认知优越"],
+  "image_style": "none",
+  "topic_lane": "pre_market",
+  "applicable_personas": ["crypto_degen"],
+  "content_mode": "insight",
+  "optimal_length": "short"
+}

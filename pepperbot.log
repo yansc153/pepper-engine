@@ -1,0 +1,84 @@
+2026-05-14 18:29:08 [WARNING] llm: Salvaged partial Claude JSON: ['tweet', 'total', 'misses']
+2026-05-14 18:29:08 [INFO] main: Draft failed eval, attempting targeted rewrite: 总分不够：立场偏软
+2026-05-14 18:29:08 [INFO] main: Image acquired for post: /tmp/nonexistent-source.jpg
+2026-05-14 18:29:08 [INFO] main: [unit] Post #1 published (score=82, type=market_hot_take, url=https://x.com/off_thetarget/status/1)
+2026-05-14 18:29:45 [WARNING] llm: Salvaged partial Claude JSON: ['tweet', 'total', 'misses']
+2026-05-14 18:29:45 [INFO] main: Draft failed eval, attempting targeted rewrite: 总分不够：立场偏软
+2026-05-14 18:29:45 [INFO] main: Image acquired for post: /tmp/nonexistent-source.jpg
+2026-05-14 18:29:45 [INFO] main: [unit] Post #1 published (score=82, type=market_hot_take, url=https://x.com/off_thetarget/status/1)
+2026-05-14 18:29:51 [WARNING] llm: Salvaged partial Claude JSON: ['tweet', 'total', 'misses']
+2026-05-14 18:29:51 [INFO] main: Draft failed eval, attempting targeted rewrite: 总分不够：立场偏软
+2026-05-14 18:29:51 [INFO] main: Image acquired for post: /tmp/nonexistent-source.jpg
+2026-05-14 18:29:51 [INFO] main: [unit] Post #1 published (score=82, type=market_hot_take, url=https://x.com/off_thetarget/status/1)
+2026-05-14 18:31:00 [WARNING] llm: Salvaged partial Claude JSON: ['tweet', 'total', 'misses']
+2026-05-14 18:31:00 [INFO] main: Draft failed eval, attempting targeted rewrite: 总分不够：立场偏软
+2026-05-14 18:31:00 [INFO] main: Image acquired for post: /tmp/nonexistent-source.jpg
+2026-05-14 18:31:00 [INFO] main: [unit] Post #1 published (score=82, type=market_hot_take, url=https://x.com/off_thetarget/status/1)
+2026-05-14 18:31:26 [WARNING] llm: Salvaged partial Claude JSON: ['tweet', 'total', 'misses']
+2026-05-14 18:31:26 [INFO] main: Draft failed eval, attempting targeted rewrite: 总分不够：立场偏软
+2026-05-14 18:31:26 [INFO] main: Image acquired for post: /tmp/nonexistent-source.jpg
+2026-05-14 18:31:26 [INFO] main: [unit] Post #1 published (score=82, type=market_hot_take, url=https://x.com/off_thetarget/status/1)
+2026-05-14 18:38:16 [WARNING] llm: Salvaged partial Claude JSON: ['tweet', 'total', 'misses']
+2026-05-14 18:38:16 [INFO] main: Draft failed eval, attempting targeted rewrite: 总分不够：立场偏软
+2026-05-14 18:38:16 [INFO] main: Image acquired for post: /tmp/nonexistent-source.jpg
+2026-05-14 18:38:16 [INFO] main: [unit] Post #1 published (score=82, type=market_hot_take, url=https://x.com/off_thetarget/status/1)
+2026-05-14 18:45:59 [WARNING] llm: Salvaged partial Claude JSON: ['tweet', 'total', 'misses']
+2026-05-14 18:45:59 [INFO] main: Draft failed eval, attempting targeted rewrite: 总分不够：立场偏软
+2026-05-14 18:45:59 [INFO] main: Image acquired for post: /tmp/nonexistent-source.jpg
+2026-05-14 18:45:59 [INFO] main: [unit] Post #1 published (score=82, type=market_hot_take, url=https://x.com/off_thetarget/status/1)
+2026-05-14 18:48:35 [WARNING] llm: Salvaged partial Claude JSON: ['tweet', 'total', 'misses']
+2026-05-14 18:48:35 [INFO] main: Draft failed eval, attempting targeted rewrite: 总分不够：立场偏软
+2026-05-14 18:48:35 [INFO] main: Image acquired for post: /tmp/nonexistent-source.jpg
+2026-05-14 18:48:35 [WARNING] main: OpenCLI publish failed, falling back: ok: false
+error:
+  code: COMMAND_EXEC
+  message: 'Not a valid file: /tmp/nonexistent-source.jpg'
+  exitCode: 1
+2026-05-14 18:48:35 [INFO] main: [unit] Post #1 published (score=82, type=market_hot_take, backend=playwright, url=https://x.com/off_thetarget/status/1)
+2026-05-14 18:48:35 [WARNING] main: OpenCLI publish failed, falling back: bridge down
+2026-05-14 18:49:47 [WARNING] llm: Salvaged partial Claude JSON: ['tweet', 'total', 'misses']
+2026-05-14 18:49:47 [INFO] main: Draft failed eval, attempting targeted rewrite: 总分不够：立场偏软
+2026-05-14 18:49:47 [INFO] main: Image acquired for post: /tmp/nonexistent-source.jpg
+2026-05-14 18:49:47 [WARNING] main: OpenCLI publish failed, falling back: ok: false
+error:
+  code: COMMAND_EXEC
+  message: 'Not a valid file: /tmp/nonexistent-source.jpg'
+  exitCode: 1
+2026-05-14 18:49:47 [INFO] main: [unit] Post #1 published (score=82, type=market_hot_take, backend=playwright, url=https://x.com/off_thetarget/status/1)
+2026-05-14 18:49:47 [WARNING] main: OpenCLI publish failed, falling back: bridge down
+2026-05-14 18:52:17 [WARNING] llm: Salvaged partial Claude JSON: ['tweet', 'total', 'misses']
+2026-05-14 18:52:17 [INFO] main: Draft failed eval, attempting targeted rewrite: 总分不够：立场偏软
+2026-05-14 18:52:17 [INFO] main: Image acquired for post: /tmp/nonexistent-source.jpg
+2026-05-14 18:52:17 [WARNING] main: OpenCLI publish failed, falling back: ok: false
+error:
+  code: COMMAND_EXEC
+  message: 'Not a valid file: /tmp/nonexistent-source.jpg'
+  exitCode: 1
+2026-05-14 18:52:17 [INFO] main: [unit] Post #1 published (score=82, type=market_hot_take, backend=playwright, url=https://x.com/off_thetarget/status/1)
+2026-05-14 18:52:17 [WARNING] main: OpenCLI publish failed, falling back: bridge down
+2026-05-14 18:52:52 [WARNING] llm: Salvaged partial Claude JSON: ['tweet', 'total', 'misses']
+2026-05-14 18:52:52 [INFO] main: Draft failed eval, attempting targeted rewrite: 总分不够：立场偏软
+2026-05-14 18:52:52 [INFO] main: Image acquired for post: /tmp/nonexistent-source.jpg
+2026-05-14 18:52:52 [WARNING] main: OpenCLI publish failed, falling back: ok: false
+error:
+  code: COMMAND_EXEC
+  message: 'Not a valid file: /tmp/nonexistent-source.jpg'
+  exitCode: 1
+2026-05-14 18:52:52 [INFO] main: [unit] Post #1 published (score=82, type=market_hot_take, backend=playwright, url=https://x.com/off_thetarget/status/1)
+2026-05-14 18:52:52 [WARNING] main: OpenCLI source ingest failed, falling back to scraper: bridge
+2026-05-14 18:52:52 [INFO] main: Fallback scraper returned 1 finance items
+2026-05-14 18:52:52 [INFO] main: OpenCLI source ingest returned 1 Xueqiu items
+2026-05-14 18:52:52 [WARNING] main: OpenCLI publish failed, falling back: bridge down
+2026-05-14 18:57:38 [WARNING] llm: Salvaged partial Claude JSON: ['tweet', 'total', 'misses']
+2026-05-14 18:57:38 [INFO] main: Draft failed eval, attempting targeted rewrite: 总分不够：立场偏软
+2026-05-14 18:57:38 [INFO] main: Image acquired for post: /tmp/nonexistent-source.jpg
+2026-05-14 18:57:39 [WARNING] main: OpenCLI publish failed, falling back: ok: false
+error:
+  code: COMMAND_EXEC
+  message: 'Not a valid file: /tmp/nonexistent-source.jpg'
+  exitCode: 1
+2026-05-14 18:57:39 [INFO] main: [unit] Post #1 published (score=82, type=market_hot_take, backend=playwright, url=https://x.com/off_thetarget/status/1)
+2026-05-14 18:57:39 [WARNING] main: OpenCLI source ingest failed, falling back to scraper: bridge
+2026-05-14 18:57:39 [INFO] main: Fallback scraper returned 1 finance items
+2026-05-14 18:57:39 [INFO] main: OpenCLI source ingest returned 1 Xueqiu items
+2026-05-14 18:57:39 [WARNING] main: OpenCLI publish failed, falling back: bridge down

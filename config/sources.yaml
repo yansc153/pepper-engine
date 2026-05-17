@@ -1,0 +1,42 @@
+# config/sources.yaml
+# Observer adapters configuration.
+# Each entry maps to an observer in src/observers/.
+# cookie_env_key is the name of an env var pointing at a cookie file path.
+
+adapters:
+  - name: x_list_finance
+    enabled: true
+    list_url: "https://x.com/i/lists/2056032482127175889"
+    cookie_env_key: TWITTER_COOKIE_FILE
+    rate_limit_per_hour: 12
+    tier_default: 1
+    max_posts_per_fetch: 30
+
+  - name: x_list_general
+    enabled: false                       # 待用户提供具体 List URL
+    list_url: ""
+    cookie_env_key: TWITTER_COOKIE_FILE
+    rate_limit_per_hour: 12
+    tier_default: 3
+    max_posts_per_fetch: 30
+
+  - name: xueqiu
+    enabled: true
+    feed_url: "https://xueqiu.com/v4/statuses/topic.json"
+    cookie_env_key: XUEQIU_COOKIE_FILE
+    rate_limit_per_hour: 24
+    tier_default: 2
+
+  - name: futu
+    enabled: true
+    feed_url: "https://q.futunn.com/nnq/recommend"
+    cookie_env_key: FUTU_COOKIE_FILE
+    rate_limit_per_hour: 12
+    tier_default: 2
+    click_refresh: true                  # 富途特性：抓前必须点 "推荐" tab
+
+  - name: news_flash
+    enabled: true
+    sources: ["eastmoney_kuaixun"]
+    rate_limit_per_hour: 30
+    tier_default: 0

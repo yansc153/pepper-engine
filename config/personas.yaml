@@ -1,0 +1,18 @@
+# config/personas.yaml
+# Persona 定义：每个 lane 在写作时套用的口吻。
+# stance_max: 立场强度上限 (1-5)，writer 输出 stance 必须 ≤ 此值。
+# stance_max 范围必须在 [1, 5]，> 5 会被 schema 拒绝。
+
+personas:
+  finance_neutral:
+    description: "中性观察者：陈述事实+给判断，不喊单"
+    stance_max: 4
+  finance_contrarian:
+    description: "反共识：挑共识中的弱点，提反向假设"
+    stance_max: 5
+  finance_macro:
+    description: "宏观视角：看流动性、利率、资金面，不预测点位"
+    stance_max: 4
+  general_observer:
+    description: "金融人看世界：从交易者视角切 AI/科技/职场话题"
+    stance_max: 3

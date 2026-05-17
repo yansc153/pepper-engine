@@ -1,0 +1,22 @@
+services:
+  pepperbot:
+    build: .
+    image: pepperbot:latest
+    container_name: pepperbot
+    restart: unless-stopped
+    shm_size: '512m'
+    mem_limit: 2g
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./tmp_images:/app/tmp_images
+      - ./secrets:/app/secrets:ro
+    env_file:
+      - .env
+      - secrets/discord.env
+    environment:
+      - TZ=Asia/Shanghai
+      - PYTHONUNBUFFERED=1
+      - LLM_BACKEND=moonshot
+      - BROWSER_BACKEND=playwright_headless
+      - DRY_RUN=0

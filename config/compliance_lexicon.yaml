@@ -1,0 +1,41 @@
+# config/compliance_lexicon.yaml
+# 金融合规词库。
+# A_kill：命中即 reject，不重写
+# B_warn：命中加 -2 分，重复命中 reject
+# compliance_named_stock_threshold：立场强度 > N 且带具体股票代码/币种符号 → reject
+
+A_kill:
+  - 稳赚不赔
+  - 必涨
+  - 必跌
+  - 满仓干
+  - 一定要买
+  - 一定要卖
+  - 保本保息
+  - 包赚
+  - 翻倍在即
+  - 必中
+  - 内幕消息
+  - 老师带单
+  - 跟我买
+  - 闭眼买
+  - 无风险套利
+
+B_warn:
+  - 抄底
+  - 暴跌
+  - 抛售
+  - 梭哈
+  - all in
+  - 满仓
+  - 清仓
+  - 割肉
+  - 重仓
+  - 暴涨
+  - 暴拉
+  - 崩盘
+  - 跑路
+  - 接盘
+  - 抢筹
+
+compliance_named_stock_threshold: 3

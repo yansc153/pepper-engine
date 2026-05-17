@@ -1,0 +1,18 @@
+# config/kol_list_finance.yaml
+# 金融方向 KOL 列表 + List URL。
+# 真正抓取走 X List URL；handles 列表用于 cross-reference 监控（小号查大号）+ 评论目标。
+# tier: 1 = 必抓，2 = 选抓，3 = 低优先
+
+list_url: "https://x.com/i/lists/2056032482127175889"
+
+handles:
+  # TODO 用户后续填入真实 handle。下面是占位示例，不要直接发布到生产。
+  - handle: "TODO_finance_kol_1"
+    tier: 1
+    note: "PLACEHOLDER — 用户补充"
+  - handle: "TODO_finance_kol_2"
+    tier: 1
+    note: "PLACEHOLDER — 用户补充"
+  - handle: "TODO_finance_kol_3"
+    tier: 2
+    note: "PLACEHOLDER — 用户补充"

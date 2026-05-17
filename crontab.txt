@@ -1,0 +1,26 @@
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+# All times UTC. CST = UTC+8.
+# Every row goes through scripts/cron_wrap.sh which provides:
+#   - per-slot dated logs (logs/pepperbot-<slot>-YYYY-MM-DD.log)
+#   - flock contention is logged + webhook-alerted (NOT silent)
+#   - non-zero exit fires webhook alert with last 10 log lines
+#   - 14-day log retention
+
+# Observe sources hourly
+0 *  * * *           root /app/scripts/cron_wrap.sh observe       /app/scripts/run.sh observe
+
+# Post window: 22:00-15:00 UTC every 2h (= 06:00-23:00 CST)
+0 22-23,0-15/2 * * * root /app/scripts/cron_wrap.sh post          /app/scripts/run.sh post
+
+# Discord approval gate poller every 5 min
+*/5 * * * *          root /app/scripts/cron_wrap.sh discord_poll  /app/scripts/run.sh discord_poll
+
+# Self-monitor (cross-reference wild posts) every 6h
+0 */6 * * *          root /app/scripts/cron_wrap.sh self_monitor  /app/scripts/run.sh self_monitor
+
+# Daily mine -> review at 16:00 UTC = 00:00 CST (chained under one lock)
+0 16 * * *           root /app/scripts/cron_wrap.sh nightly       bash -c '/app/scripts/run.sh mine && /app/scripts/run.sh review'
+
+# Weekly full remine: Sunday 04:00 UTC = 12:00 CST Sun
+0 4 * * 0            root /app/scripts/cron_wrap.sh remine        /app/scripts/run.sh remine
