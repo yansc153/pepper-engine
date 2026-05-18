@@ -21,7 +21,10 @@ from observers.base import (
 
 logger = logging.getLogger(__name__)
 
-EASTMONEY_KUAIXUN_URL = "https://np-listapi.eastmoney.com/comm/web/getNewsByColumns"
+EASTMONEY_KUAIXUN_URL = (
+    "https://np-listapi.eastmoney.com/comm/web/getNewsByColumns"
+    "?client=web&biz=web_724hour&column=102&pageSize=20&pageIndex=1"
+)
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "

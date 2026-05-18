@@ -40,3 +40,4 @@ secrets/
 secrets/**
 *.cookies.json
 *.bak_*
+data/browser_session/

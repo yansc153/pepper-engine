@@ -22,13 +22,13 @@ adapters:
 
   - name: xueqiu
     enabled: true
-    feed_url: "https://xueqiu.com/v4/statuses/topic.json"
+    feed_url: "https://xueqiu.com/v4/statuses/public_timeline_by_category.json?since_id=-1&max_id=-1&count=20&category=-1"
     cookie_env_key: XUEQIU_COOKIE_FILE
     rate_limit_per_hour: 24
     tier_default: 2
 
   - name: futu
-    enabled: true
+    enabled: false                       # DOM changed 2026-05; selectors need re-reversing
     feed_url: "https://q.futunn.com/nnq/recommend"
     cookie_env_key: FUTU_COOKIE_FILE
     rate_limit_per_hour: 12
