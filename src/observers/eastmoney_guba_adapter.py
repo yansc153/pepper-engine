@@ -185,7 +185,14 @@ class EastmoneyGubaAdapter:
             try:
                 ctx = await browser.new_context()
                 page = await ctx.new_page()
-                await page.goto(self._homepage_url, timeout=self._page_timeout_ms)
+                # wait_until='domcontentloaded' — guba homepage's "load" event
+                # never settles (analytics/trackers keep pinging). We just need
+                # the HTML; the #mainlist wait below handles React hydration.
+                await page.goto(
+                    self._homepage_url,
+                    timeout=self._page_timeout_ms,
+                    wait_until="domcontentloaded",
+                )
                 try:
                     await page.wait_for_selector(
                         f"{MAINLIST_SELECTOR} a[href*='/news,']",
