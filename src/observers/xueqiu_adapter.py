@@ -178,27 +178,44 @@ class XueqiuAdapter:
 
     def _row_to_observation(self, raw: dict[str, Any]) -> Observation:
         user = raw.get("user") or {}
-        handle = (user.get("screen_name") or "").strip()
-        if not handle:
-            raise ObservationValidationError("missing author handle")
+        # public_timeline_by_category headline items don't carry user;
+        # fall back to "xueqiu_topic" as the handle so we still capture them.
+        handle = (user.get("screen_name") or "").strip() or "xueqiu_topic"
+
         target = raw.get("target") or ""
         if not target:
             raise ObservationValidationError("missing target url")
         url = target if target.startswith("http") else f"https://xueqiu.com{target}"
-        pic = raw.get("pic_sizes") or raw.get("pic") or ""
+        pic = raw.get("pic_sizes") or raw.get("pic") or raw.get("first_pic") or ""
         has_image = bool(pic) and pic != ""
 
-        # xueqiu created_at is epoch milliseconds
-        created_raw = raw.get("created_at")
+        # Content priority: text (status) → description (topic) → title (headline)
+        content = (
+            raw.get("text")
+            or raw.get("description")
+            or raw.get("title")
+            or raw.get("topic_desc")
+            or raw.get("topic_title")
+            or ""
+        ).strip()
+        if not content:
+            raise ObservationValidationError("empty content")
+
+        # xueqiu created_at is epoch milliseconds; topic items may lack it
+        created_raw = raw.get("created_at") or raw.get("timeBefore")
         if isinstance(created_raw, (int, float)) and created_raw > 1e12:
             posted_at = datetime.fromtimestamp(created_raw / 1000, tz=timezone.utc)
+        elif isinstance(created_raw, (int, float)) and created_raw > 0:
+            posted_at = datetime.fromtimestamp(created_raw, tz=timezone.utc)
         else:
-            posted_at = created_raw  # let from_scrape_dict coerce
+            # headline items often have no timestamp — use "now" so they fall
+            # into the recent-observation window for topic clustering.
+            posted_at = datetime.now(timezone.utc)
 
         return from_scrape_dict(
             {
                 "author_handle": handle,
-                "content": raw.get("text") or raw.get("description") or "",
+                "content": content,
                 "posted_at": posted_at,
                 "likes": raw.get("fav_count", 0),
                 "retweets": raw.get("retweet_count", 0),

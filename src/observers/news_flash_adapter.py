@@ -22,8 +22,8 @@ from observers.base import (
 logger = logging.getLogger(__name__)
 
 EASTMONEY_KUAIXUN_URL = (
-    "https://np-listapi.eastmoney.com/comm/web/getNewsByColumns"
-    "?client=web&biz=web_724hour&column=102&pageSize=20&pageIndex=1"
+    "https://www.cls.cn/nodeapi/updateTelegraphList"
+    "?app=CailianpressWeb&os=web&sv=8.4.6&category=&lastTime="
 )
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
@@ -121,24 +121,41 @@ class NewsFlashAdapter:
 
     @staticmethod
     def _extract_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
-        # Eastmoney returns either {"data": {"list": [...]}} or {"list": [...]}
+        # cls.cn returns {"data": {"roll_data": [...]}}; eastmoney legacy
+        # returned {"data": {"list": [...]}} — support both shapes.
         if "data" in payload and isinstance(payload["data"], dict):
-            return payload["data"].get("list") or []
-        return payload.get("list") or []
+            data = payload["data"]
+            return data.get("roll_data") or data.get("list") or []
+        return payload.get("list") or payload.get("roll_data") or []
 
     def _row_to_observation(self, raw: dict[str, Any]) -> Observation:
-        title = (raw.get("title") or "").strip()
-        digest = (raw.get("digest") or raw.get("summary") or "").strip()
-        content = f"{title}\n{digest}".strip()
+        # cls.cn uses {title, content, shareurl, ctime} where ctime is epoch seconds.
+        title = (raw.get("title") or raw.get("brief") or "").strip()
+        body = (
+            raw.get("content")
+            or raw.get("digest")
+            or raw.get("summary")
+            or ""
+        ).strip()
+        content = (f"{title}\n{body}".strip() if title else body)
         if not content:
             raise ObservationValidationError("empty news flash content")
 
-        url = raw.get("url_unique") or raw.get("url") or raw.get("link") or ""
+        url = (
+            raw.get("shareurl")
+            or raw.get("share_url")
+            or raw.get("url_unique")
+            or raw.get("url")
+            or raw.get("link")
+            or ""
+        )
         if not url:
             raise ObservationValidationError("missing url")
 
         ts = (
-            raw.get("showtime")
+            raw.get("ctime")
+            or raw.get("modified_time")
+            or raw.get("showtime")
             or raw.get("pub_time")
             or raw.get("posted_at")
             or raw.get("created_at")
@@ -146,9 +163,10 @@ class NewsFlashAdapter:
         if ts is None:
             raise ObservationValidationError("missing timestamp")
 
-        # Eastmoney ships local time strings like "2026-01-01 09:00:00" — treat
-        # as UTC+8 (Asia/Shanghai) per news-flash convention.
-        if isinstance(ts, str) and "T" not in ts and len(ts) >= 19:
+        # cls.cn returns ctime as epoch seconds (10-digit int)
+        if isinstance(ts, (int, float)) and ts > 1e9:
+            ts = datetime.fromtimestamp(ts, tz=timezone.utc)
+        elif isinstance(ts, str) and "T" not in ts and len(ts) >= 19:
             try:
                 naive = datetime.strptime(ts[:19], "%Y-%m-%d %H:%M:%S")
                 ts = naive.replace(tzinfo=timezone.utc)

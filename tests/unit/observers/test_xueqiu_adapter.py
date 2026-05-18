@@ -56,8 +56,10 @@ async def test_fetch_latest_parses_payload(cookie_env, fixture_payload, monkeypa
 
     monkeypatch.setattr(XueqiuAdapter, "_fetch_payload", _fake)
     obs_list = await adapter.fetch_latest(datetime(2020, 1, 1, tzinfo=timezone.utc))
-    # one row has empty handle -> skipped, so we expect 4
-    assert len(obs_list) == 4
+    # parser now falls back to 'xueqiu_topic' handle for headline items that
+    # lack a user, so empty-handle rows are kept (5 total). They must still
+    # have content + target — the fixture's empty-handle row has both.
+    assert len(obs_list) == 5
     assert all(o.source == "xueqiu" for o in obs_list)
     assert all(o.author_tier == 2 for o in obs_list)
     assert any(o.has_image for o in obs_list)
@@ -104,11 +106,13 @@ async def test_health_check_false_without_cookies(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_parse_payload_skips_rows_without_handle(cookie_env, monkeypatch) -> None:
-    # only one row, has empty user.screen_name -> skipped
-    bad_payload = {"list": [{"user": {"screen_name": ""}, "text": "x",
-                              "target": "/1/2", "created_at": 1767225600000,
-                              "fav_count": 1, "retweet_count": 0, "reply_count": 0}]}
+async def test_parse_payload_skips_rows_without_content_or_target(cookie_env, monkeypatch) -> None:
+    """Empty handle is no longer fatal (we fall back to 'xueqiu_topic'),
+    but rows missing BOTH content AND target must still be dropped."""
+    bad_payload = {"list": [
+        {"user": {"screen_name": ""}, "text": "", "target": "",
+         "created_at": 1767225600000, "fav_count": 1, "retweet_count": 0, "reply_count": 0},
+    ]}
 
     async def _fake(self):
         return bad_payload
