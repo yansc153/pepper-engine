@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 XUEQIU_FEED_URL = (
     "https://xueqiu.com/v4/statuses/public_timeline_by_category.json"
-    "?since_id=-1&max_id=-1&count=20&category=-1"
+    "?since_id=-1&max_id=-1&count=20&category=105"  # 105 = 沪深 (real A-share status posts)
 )
 XUEQIU_HOME_URL = "https://xueqiu.com/"
 DEFAULT_USER_AGENT = (

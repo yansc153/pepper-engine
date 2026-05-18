@@ -22,13 +22,16 @@ adapters:
 
   - name: xueqiu
     enabled: true
-    feed_url: "https://xueqiu.com/v4/statuses/public_timeline_by_category.json?since_id=-1&max_id=-1&count=20&category=-1"
+    feed_url: "https://xueqiu.com/v4/statuses/public_timeline_by_category.json?since_id=-1&max_id=-1&count=20&category=105"
     cookie_env_key: XUEQIU_COOKIE_FILE
     rate_limit_per_hour: 24
     tier_default: 2
 
   - name: futu
-    enabled: true                        # re-enabled with broader selectors
+    enabled: false                       # disabled: DOM is SPA-rendered; 9 selectors miss.
+                                         # to re-enable: open DevTools on q.futunn.com,
+                                         # find new card class name, add to CANDIDATE_SELECTORS
+                                         # in futu_adapter.py
     feed_url: "https://q.futunn.com/nnq/recommend"
     cookie_env_key: FUTU_COOKIE_FILE
     rate_limit_per_hour: 12
