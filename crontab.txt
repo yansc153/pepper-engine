@@ -7,23 +7,23 @@ PATH=/usr/local/bin:/usr/bin:/bin
 #   - non-zero exit fires webhook alert with last 10 log lines
 #   - 14-day log retention
 
-# observe runs BOTH adapters (x_list_finance for KOL voice learning,
-# eastmoney_guba for article content). Pull 3x/day to keep KOL feed fresh.
-0 0 * * *   root /app/scripts/cron_wrap.sh observe_midnight /app/scripts/run.sh observe
-0 8 * * *   root /app/scripts/cron_wrap.sh observe_midday   /app/scripts/run.sh observe
-30 22 * * * root /app/scripts/cron_wrap.sh morning_observe  /app/scripts/run.sh observe
+# 左手 7x24 学习管道：
+#   observe = 拉 KOL 推 + guba 文章 (raw_url 去重，guba 多拉零成本)
+#   mine    = 把 tier>=1 的 KOL 观察蒸馏成 technique_entries
+# 30 分钟一次 observe = 48 次/天，x_list_finance 12/h 配额绰绰有余
+# 2 小时一次 mine = 12 次/天，让冷启动 50 阈值在 2-3 天内跨过
+*/30 * * * * root /app/scripts/cron_wrap.sh observe    /app/scripts/run.sh observe
+0 */2 * * *  root /app/scripts/cron_wrap.sh mine       /app/scripts/run.sh mine
 
-# Morning batch: 23:00 UTC = 07:00 CST. Generate up to 20 drafts from
-# observed material; push to Discord for triage.
-0 23 * * *  root /app/scripts/cron_wrap.sh morning_batch    /app/scripts/run.sh batch_post
+# 右手生产：morning batch 23:00 UTC = 07:00 CST，生成 20 条草稿推 Discord。
+0 23 * * *   root /app/scripts/cron_wrap.sh morning_batch /app/scripts/run.sh batch_post
 
-# Discord approval gate poller every 5 min.
-*/5 * * * * root /app/scripts/cron_wrap.sh discord_poll     /app/scripts/run.sh discord_poll
+# Discord 审批 gate 每 5 分钟轮询一次。
+*/5 * * * *  root /app/scripts/cron_wrap.sh discord_poll  /app/scripts/run.sh discord_poll
 
-# Daily mine -> review at 16:00 UTC = 00:00 CST (chained under one lock).
-# mine = distill viral KOL observations into technique_entries + weave edges.
-# review = score yesterday's posts, EMA-update technique success scores.
-0 16 * * *  root /app/scripts/cron_wrap.sh nightly          bash -c '/app/scripts/run.sh mine && /app/scripts/run.sh review'
+# 日终 review (16:00 UTC = 00:00 CST)：评分昨日推文 + EMA 更新技巧成功分。
+# mine 已经独立跑了，这里 review 单飞。
+0 16 * * *   root /app/scripts/cron_wrap.sh nightly       /app/scripts/run.sh review
 
-# Weekly full remine: Sunday 04:00 UTC = 12:00 CST Sun.
-0 4 * * 0   root /app/scripts/cron_wrap.sh remine           /app/scripts/run.sh remine
+# 周日 04:00 UTC = 12:00 CST 全量 remine：重算所有边 + 衰减 + 剪枝。
+0 4 * * 0    root /app/scripts/cron_wrap.sh remine        /app/scripts/run.sh remine
