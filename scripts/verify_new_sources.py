@@ -17,6 +17,7 @@ from pathlib import Path
 SA_COOKIE = Path("/app/secrets/seekingalpha_cookies.json")
 SA_URL = "https://seekingalpha.com/stock-ideas/ai-tech-stocks"
 GUBA_URL = "https://guba.eastmoney.com/list,zssh000001,99.html"
+WSB_URL = "https://www.reddit.com/r/wallstreetbets/hot.json?limit=10"
 
 UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -85,6 +86,34 @@ async def probe_one(name: str, url: str, cookie_file: Path | None) -> dict:
     return report
 
 
+async def probe_wsb_json() -> dict:
+    """Reddit .json endpoint — no Playwright needed, just httpx with realistic UA."""
+    import httpx
+    report: dict = {"name": "wallstreetbets", "url": WSB_URL}
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.get(WSB_URL, headers={"User-Agent": UA})
+            report["http_status"] = resp.status_code
+            if resp.status_code != 200:
+                report["body_snippet"] = resp.text[:200]
+                return report
+            data = resp.json()
+            children = data.get("data", {}).get("children", [])
+            report["post_count"] = len(children)
+            if children:
+                first = children[0]["data"]
+                report["first_title"] = first.get("title", "")[:80]
+                report["first_score"] = first.get("score", 0)
+                report["first_url"] = first.get("url", "")
+                report["first_has_image"] = bool(
+                    first.get("preview") or first.get("post_hint") == "image"
+                )
+                report["first_selftext_chars"] = len(first.get("selftext", ""))
+    except Exception as exc:  # noqa: BLE001
+        report["error"] = str(exc)
+    return report
+
+
 async def main() -> None:
     results = []
     print("=== Probing eastmoney guba (no cookie needed) ===")
@@ -95,17 +124,25 @@ async def main() -> None:
     results.append(await probe_one("seekingalpha", SA_URL, SA_COOKIE))
     print(json.dumps(results[-1], ensure_ascii=False, indent=2))
 
+    print("\n=== Probing reddit /r/wallstreetbets via .json ===")
+    wsb = await probe_wsb_json()
+    results.append(wsb)
+    print(json.dumps(wsb, ensure_ascii=False, indent=2))
+
     print("\n=== VERDICT ===")
     for r in results:
-        ok = (
-            r.get("http_status") in (200, 304)
-            and not r.get("challenge_hit", False)
-            and r.get("body_chars", 0) > 1000
-        )
+        if r["name"] == "wallstreetbets":
+            ok = r.get("http_status") == 200 and r.get("post_count", 0) > 0
+        else:
+            ok = (
+                r.get("http_status") in (200, 304)
+                and not r.get("challenge_hit", False)
+                and r.get("body_chars", 0) > 1000
+            )
         print(f"  {r['name']}: {'PASS' if ok else 'FAIL'} "
               f"(status={r.get('http_status')}, "
-              f"body={r.get('body_chars')} chars, "
-              f"challenge={r.get('challenge_hit')})")
+              f"body/posts={r.get('body_chars') or r.get('post_count')}, "
+              f"challenge={r.get('challenge_hit', 'n/a')})")
 
 
 if __name__ == "__main__":
