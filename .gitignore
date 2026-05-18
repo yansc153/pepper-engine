@@ -41,3 +41,4 @@ secrets/**
 *.cookies.json
 *.bak_*
 data/browser_session/
+tmp_images/
