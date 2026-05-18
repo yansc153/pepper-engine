@@ -41,7 +41,7 @@ def test_load_real_configs_succeeds() -> None:
     """The shipped yaml files all validate."""
     cfg = load_all_configs(REPO_ROOT)
     assert isinstance(cfg, AppConfig)
-    # spot check: 5 adapters total
+    # spot check: 6 adapters total (added eastmoney_guba)
     names = {a.name for a in cfg.sources.adapters}
     assert names == {
         "x_list_finance",
@@ -49,6 +49,7 @@ def test_load_real_configs_succeeds() -> None:
         "xueqiu",
         "futu",
         "news_flash",
+        "eastmoney_guba",
     }
 
 

@@ -41,3 +41,19 @@ adapters:
     sources: ["eastmoney_kuaixun"]
     rate_limit_per_hour: 30
     tier_default: 0
+
+  - name: eastmoney_guba
+    enabled: true     # A-shares topic source: 东方财富股吧 hot threads with images
+    stock_codes:
+      - zssh000001    # 上证指数
+      - zszx399006    # 创业板指
+      - "600519"      # 茅台
+      - "000858"      # 五粮液
+      - "300750"      # 宁德时代
+      - "002594"      # 比亚迪
+      - "600036"      # 招商银行
+      - "300059"      # 东方财富
+    min_reads: 10000
+    rate_limit_per_hour: 6
+    tier_default: 0   # topic source only, NOT learned
+    max_posts_per_fetch: 20
