@@ -101,7 +101,7 @@ class EastmoneyGubaAdapter:
     def __init__(
         self,
         homepage_url: str = GUBA_HOMEPAGE_URL,
-        min_content_length: int = 3000,
+        min_content_length: int = 1500,
         max_posts_per_fetch: int = 15,
         detail_concurrency: int = 3,
         tier_default: int = 0,

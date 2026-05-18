@@ -48,7 +48,7 @@ def test_implements_source_adapter_protocol() -> None:
 def test_init_defaults() -> None:
     adapter = EastmoneyGubaAdapter()
     assert adapter._homepage_url == "https://guba.eastmoney.com/"
-    assert adapter._min_content_length == 3000
+    assert adapter._min_content_length == 1500
     assert adapter._max_posts == 15
     assert adapter._detail_concurrency == 3
     assert adapter._tier_default == 0

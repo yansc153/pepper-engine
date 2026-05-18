@@ -44,8 +44,8 @@ adapters:
   - name: eastmoney_guba
     enabled: true     # Homepage 精选 feed: long-form Chinese stock articles with images
     homepage_url: "https://guba.eastmoney.com/"
-    min_content_length: 3000
-    max_posts_per_fetch: 15
-    detail_concurrency: 3
+    min_content_length: 1500    # 1500+ chars enters DB; writer tiers length based on source
+    max_posts_per_fetch: 30     # 精选 feed has ~30 cards; let it pull all of them
+    detail_concurrency: 4
     rate_limit_per_hour: 6
     tier_default: 0
