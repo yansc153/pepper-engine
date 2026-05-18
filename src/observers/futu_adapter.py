@@ -40,7 +40,7 @@ class FutuAdapter:
     def __init__(
         self,
         feed_url: str = FUTU_FEED_URL,
-        tier_default: int = 2,
+        tier_default: int = 0,  # tier=0: contributes topic candidates only, NOT learned
         max_posts_per_fetch: int = 30,
         page_timeout_ms: int = 20000,
     ) -> None:

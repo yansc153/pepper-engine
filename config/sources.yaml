@@ -25,7 +25,7 @@ adapters:
     feed_url: "https://xueqiu.com/v4/statuses/public_timeline_by_category.json?since_id=-1&max_id=-1&count=20&category=105"
     cookie_env_key: XUEQIU_COOKIE_FILE
     rate_limit_per_hour: 24
-    tier_default: 2
+    tier_default: 0   # topic/content source only, NOT learned (would pollute X writing style)
 
   - name: futu
     enabled: false                       # disabled: DOM is SPA-rendered; 9 selectors miss.
@@ -35,11 +35,12 @@ adapters:
     feed_url: "https://q.futunn.com/nnq/recommend"
     cookie_env_key: FUTU_COOKIE_FILE
     rate_limit_per_hour: 12
-    tier_default: 2
+    tier_default: 0   # topic/content source only, NOT learned (same reason as xueqiu)
     click_refresh: true                  # 富途特性：抓前必须点 "推荐" tab
 
   - name: news_flash
-    enabled: true
+    enabled: false   # disabled: xueqiu/futu/x_list_finance together provide
+                     # enough finance signal without geopolitics leakage
     sources: ["eastmoney_kuaixun"]
     rate_limit_per_hour: 30
     tier_default: 0

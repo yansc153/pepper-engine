@@ -151,7 +151,10 @@ def _load_recent_observations(
         "SELECT id, source, author_handle, author_tier, content, posted_at, "
         "likes, retweets, replies, impressions, has_image, raw_url, topic_hint, "
         "viral_score FROM reaction_observations "
-        "WHERE observed_at >= ? AND author_tier > 0 "
+        "WHERE observed_at >= ? AND author_tier >= 0 "
+        # tier>=0 (was >0): xueqiu/futu now ship tier=0 so they contribute
+        # topic candidates without polluting the technique-learning corpus
+        # (distiller still filters tier>0 for shape extraction).
         "ORDER BY observed_at DESC",
         (cutoff.strftime("%Y-%m-%d %H:%M:%S"),),
     ).fetchall()

@@ -61,7 +61,7 @@ async def test_fetch_latest_parses_payload(cookie_env, fixture_payload, monkeypa
     # have content + target — the fixture's empty-handle row has both.
     assert len(obs_list) == 5
     assert all(o.source == "xueqiu" for o in obs_list)
-    assert all(o.author_tier == 2 for o in obs_list)
+    assert all(o.author_tier == 0 for o in obs_list)  # tier=0: topic source, not learned
     assert any(o.has_image for o in obs_list)
     assert all(o.raw_url.startswith("https://xueqiu.com/") for o in obs_list)
 

@@ -96,10 +96,12 @@ def test_score_topics_returns_zero_when_no_observations(conn):
     assert result.top_score == 0.0
 
 
-def test_score_topics_ignores_tier_zero_observations(conn):
+def test_score_topics_accepts_tier_zero_observations(conn):
+    """Architecture: tier=0 = topic-source-only (xueqiu/futu). They must
+    contribute candidates even though they don't enter the learning corpus."""
     _insert_obs(conn, tier=0, handle="news_bot")
     result = score_topics(conn, llm_caller=_llm_returning(_PAYLOAD))
-    assert result.created == 0
+    assert result.created == 1
 
 
 def test_score_topics_creates_candidate_for_tier1(conn):

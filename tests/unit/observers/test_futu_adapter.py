@@ -62,7 +62,7 @@ async def test_fetch_latest_parses_browser_payload(
     obs_list = await adapter.fetch_latest(datetime(2020, 1, 1, tzinfo=timezone.utc))
     assert len(obs_list) == 5
     assert all(o.source == "futu" for o in obs_list)
-    assert all(o.author_tier == 2 for o in obs_list)
+    assert all(o.author_tier == 0 for o in obs_list)  # tier=0: topic source, not learned
     # one fixture post has has_image=false
     assert sum(1 for o in obs_list if o.has_image) == 4
 
