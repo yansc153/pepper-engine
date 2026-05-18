@@ -74,12 +74,14 @@ class XueqiuAdapter:
             logger.warning("xueqiu fetch failed: %s", exc)
             return []
         items = payload.get("list") or payload.get("statuses") or []
-        logger.info(
-            "xueqiu payload top_keys=%s items=%d sample_user=%s",
-            list(payload.keys()) if isinstance(payload, dict) else [],
-            len(items),
-            (items[0].get("user", {}).get("screen_name") if items else None),
-        )
+        if items:
+            first = items[0]
+            logger.info(
+                "xueqiu item keys=%s | first.id=%s first.text_snippet=%s",
+                list(first.keys()),
+                first.get("id"),
+                str(first.get("text", first.get("description", "")))[:80],
+            )
         return self._parse_payload(payload, since)
 
     async def health_check(self) -> bool:
