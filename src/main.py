@@ -236,6 +236,70 @@ async def _cmd_remine() -> CommandResult:
     return 0, {"entries_decayed": int(decayed), "entries_pruned": int(pruned)}
 
 
+async def _cmd_learning_status() -> CommandResult:
+    """One-shot read of the left-hand learning loop health.
+
+    No writes, no network — pure SELECT. Safe to run anytime.
+    """
+    from src.database import get_conn
+    from src.miner.retriever import COLD_START_CORPUS_THRESHOLD
+
+    conn = get_conn()
+    try:
+        corpus = int(conn.execute(
+            "SELECT COUNT(*) AS n FROM technique_entries"
+        ).fetchone()["n"])
+
+        kol_obs_24h = int(conn.execute(
+            "SELECT COUNT(*) AS n FROM reaction_observations "
+            "WHERE author_tier >= 1 "
+            "AND observed_at >= datetime('now', '-24 hours')"
+        ).fetchone()["n"])
+
+        distilled_today = int(conn.execute(
+            "SELECT COUNT(*) AS n FROM technique_entries "
+            "WHERE distilled_at >= datetime('now', 'start of day')"
+        ).fetchone()["n"])
+
+        retrieval_hits_24h = int(conn.execute(
+            "SELECT COUNT(*) AS n FROM retrieval_log "
+            "WHERE retrieved_at >= datetime('now', '-24 hours')"
+        ).fetchone()["n"])
+
+        last_observe = conn.execute(
+            "SELECT MAX(observed_at) AS t FROM reaction_observations "
+            "WHERE author_tier >= 1"
+        ).fetchone()["t"]
+
+        last_distill = conn.execute(
+            "SELECT MAX(distilled_at) AS t FROM technique_entries"
+        ).fetchone()["t"]
+
+        top_hooks_rows = conn.execute(
+            "SELECT hook_pattern, success_score FROM technique_entries "
+            "ORDER BY success_score DESC, distilled_at DESC LIMIT 5"
+        ).fetchall()
+        top_hooks = [
+            {"hook": r["hook_pattern"], "score": round(float(r["success_score"]), 1)}
+            for r in top_hooks_rows
+        ]
+    finally:
+        conn.close()
+
+    summary = {
+        "corpus_size": corpus,
+        "cold_start_threshold": COLD_START_CORPUS_THRESHOLD,
+        "ready_for_sql_retrieval": corpus >= COLD_START_CORPUS_THRESHOLD,
+        "kol_obs_last_24h": kol_obs_24h,
+        "techniques_distilled_today": distilled_today,
+        "retrieval_hits_last_24h": retrieval_hits_24h,
+        "last_kol_observe_at": last_observe,
+        "last_distill_at": last_distill,
+        "top_hooks": top_hooks,
+    }
+    return 0, summary
+
+
 async def _cmd_test() -> CommandResult:
     """Smoke test: import every command module, verify they load. No external calls."""
     os.environ["DRY_RUN"] = "1"
@@ -280,6 +344,7 @@ COMMANDS: dict[str, CommandFn] = {
     "mine": _cmd_mine,
     "review": _cmd_review,
     "remine": _cmd_remine,
+    "learning_status": _cmd_learning_status,
     "test": _cmd_test,
 }
 
