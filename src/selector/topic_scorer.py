@@ -31,6 +31,9 @@ _JACCARD_MERGE_THRESHOLD = 0.35
 _MIN_CLUSTER_SIZE = 1  # one tier-1 observation can still be a real topic
 _DEFAULT_LOOKBACK_HOURS = 1
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+|[一-鿿]")
+# Topic-writability gate: if the LLM-predicted virality_score is below this,
+# the topic is judged not worth a tweet — skip rather than push a weak draft.
+_MIN_VIRALITY_TO_WRITE = 40.0
 
 
 class ScoreResult(tuple[int, float]):
@@ -121,6 +124,13 @@ def pick_top_topic(
     weights: dict[str, float] = {r["topic_lane"]: float(r["weight"]) for r in weight_rows}
 
     candidates = selector_db.fetch_fresh(conn, topic_lane=topic_lane, limit=20)
+    if not candidates:
+        return None
+
+    # LLM-judged writability gate: drop candidates the predictor scored too low.
+    # virality_predictor already runs an LLM call during score_topics — we honor
+    # its judgment here rather than burning a second LLM call.
+    candidates = [c for c in candidates if float(c["virality_score"]) >= _MIN_VIRALITY_TO_WRITE]
     if not candidates:
         return None
 

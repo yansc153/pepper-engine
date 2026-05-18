@@ -31,6 +31,7 @@ def _raw(handle: str, text: str, when: datetime, **extra) -> dict:
         "views": 100,
         "has_media": False,
         "url": f"https://x.com/{handle.lstrip('@')}/status/1",
+        "image_url": "",
     }
     base.update(extra)
     return base
@@ -49,8 +50,10 @@ async def test_fetch_latest_parses_and_tags_tier(monkeypatch) -> None:
     adapter = XListFinanceAdapter()
     now = datetime(2026, 5, 17, 12, 0, tzinfo=timezone.utc)
     fixture = [
-        _raw("@alpha", "盘前快评", now, likes=200, has_media=True),
-        _raw("@beta", "板块轮动", now - timedelta(minutes=5)),
+        _raw("@alpha", "盘前快评", now, likes=200, has_media=True,
+             image_url="https://pbs.twimg.com/media/test1.jpg"),
+        _raw("@beta", "板块轮动", now - timedelta(minutes=5),
+             image_url="https://pbs.twimg.com/media/test2.jpg"),
     ]
 
     async def _fake(self):
@@ -94,8 +97,8 @@ async def test_fetch_latest_skips_malformed_rows(monkeypatch) -> None:
     adapter = XListFinanceAdapter()
     now = datetime(2026, 5, 17, 12, 0, tzinfo=timezone.utc)
     fixture = [
-        {"handle": "@x", "text": "bad"},  # missing created_at
-        _raw("@good", "ok", now),
+        {"handle": "@x", "text": "bad"},  # missing created_at AND missing image
+        _raw("@good", "ok", now, image_url="https://pbs.twimg.com/media/g.jpg"),
     ]
 
     async def _fake(self):

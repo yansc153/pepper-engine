@@ -55,9 +55,12 @@ async def test_push_draft_calls_discord_api(
     posted: dict[str, Any] = {}
     reactions: list[str] = []
 
-    async def fake_post_message(channel_id: str, content: str) -> dict[str, Any]:
+    async def fake_post_message(
+        channel_id: str, content: str, image_path: str | None = None
+    ) -> dict[str, Any]:
         posted["channel_id"] = channel_id
         posted["content"] = content
+        posted["image_path"] = image_path
         return {"id": "777111"}
 
     async def fake_put_reaction(

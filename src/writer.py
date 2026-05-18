@@ -140,6 +140,58 @@ def _normalize_topic(topic_candidate: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _pick_source_image_url(topic: dict[str, Any]) -> str | None:
+    """Look up the first source observation that has an image_url.
+
+    The topic was clustered from N observations; we pick any one of them as
+    the visual material to attach to the draft (later downloaded to
+    tmp_images/<draft_id>.jpg by _download_source_image).
+    """
+    obs_ids = _source_obs_ids(topic)
+    if not obs_ids:
+        return None
+    from src.database import get_conn
+    conn = get_conn()
+    try:
+        placeholders = ",".join(["?"] * len(obs_ids))
+        try:
+            row = conn.execute(
+                f"SELECT image_url FROM reaction_observations "
+                f"WHERE id IN ({placeholders}) AND image_url IS NOT NULL "
+                f"ORDER BY viral_score DESC LIMIT 1",
+                obs_ids,
+            ).fetchone()
+        except Exception as exc:  # noqa: BLE001 — missing column (old DB) is non-fatal
+            logger.debug("image lookup failed (column missing?): %s", exc)
+            return None
+    finally:
+        conn.close()
+    return row["image_url"] if row and row["image_url"] else None
+
+
+def _download_source_image(image_url: str, draft_id: int) -> str | None:
+    """Download source image to /app/tmp_images/draft_<id>.jpg. Return local path."""
+    import httpx
+    from pathlib import Path
+
+    tmp_dir = Path("/app/tmp_images")
+    if not tmp_dir.exists():
+        tmp_dir = Path(__file__).resolve().parent.parent / "tmp_images"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    dest = tmp_dir / f"draft_{draft_id}.jpg"
+
+    try:
+        with httpx.Client(timeout=10.0, follow_redirects=True) as client:
+            resp = client.get(image_url)
+            resp.raise_for_status()
+            dest.write_bytes(resp.content)
+        return str(dest)
+    except Exception as exc:  # noqa: BLE001 — image failure must not block draft
+        logger.warning("image download failed for draft=%s url=%s: %s",
+                       draft_id, image_url, exc)
+        return None
+
+
 def _source_obs_ids(topic: dict[str, Any]) -> list[int]:
     raw = topic.get("source_observations") or "[]"
     if isinstance(raw, list):
@@ -469,10 +521,28 @@ def _finalize(
             score_breakdown=score_result.to_dict(),
         )
 
+    # Persist first to get draft_id, then download image (need id for filename).
     try:
         draft_id = _persist_draft(draft["content"], topic, pattern_ids, image_path=None)
     except Exception as exc:  # noqa: BLE001 — persistence failure surfaces as error
         return _fail_result(topic, f"persist failed: {exc}", content=draft["content"])
+
+    # Image flow: pull source image_url from cluster, download, update draft row.
+    image_path: str | None = None
+    src_image_url = _pick_source_image_url(topic)
+    if src_image_url:
+        image_path = _download_source_image(src_image_url, draft_id)
+        if image_path:
+            from src.database import get_conn
+            conn = get_conn()
+            try:
+                with conn:
+                    conn.execute(
+                        "UPDATE drafts SET image_path = ? WHERE id = ?",
+                        (image_path, draft_id),
+                    )
+            finally:
+                conn.close()
 
     return DraftResult(
         success=True,
@@ -484,7 +554,7 @@ def _finalize(
         topic_lane=topic["predicted_topic_lane"],
         persona=topic["persona"],
         pattern_ids=pattern_ids,
-        image_path=None,
+        image_path=image_path,
         score_total=score_result.total,
         error=None,
         score_breakdown=score_result.to_dict(),

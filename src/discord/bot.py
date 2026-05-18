@@ -18,6 +18,7 @@ The module deliberately stays thin: business logic for each reaction lives in
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sqlite3
@@ -92,8 +93,33 @@ def _auth_headers() -> dict[str, str]:
 # REST helpers (single-shot, no WS)
 
 
-async def _post_message(channel_id: str, content: str) -> dict[str, Any]:
+async def _post_message(
+    channel_id: str, content: str, image_path: str | None = None
+) -> dict[str, Any]:
+    """POST a message. If image_path given, send multipart with file attached.
+
+    Image attachment lets you preview the draft visually in Discord on phone +
+    one-click download to post manually on X.
+    """
     url = f"{DISCORD_API}/channels/{channel_id}/messages"
+    if image_path and Path(image_path).exists():
+        # multipart payload: payload_json + files[0]
+        with open(image_path, "rb") as fh:
+            file_bytes = fh.read()
+        files = {
+            "payload_json": (
+                None,
+                json.dumps({"content": content}),
+                "application/json",
+            ),
+            "files[0]": (Path(image_path).name, file_bytes, "image/jpeg"),
+        }
+        # multipart must not set Content-Type (httpx generates boundary)
+        headers = {k: v for k, v in _auth_headers().items() if k != "Content-Type"}
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, headers=headers, files=files)
+            response.raise_for_status()
+            return response.json()
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.post(
             url, headers=_auth_headers(), json={"content": content}
@@ -180,7 +206,8 @@ async def push_draft_to_discord(
             message_id = f"dryrun-{draft_id}"
             LOGGER.info("[DRY_RUN] would push draft %s: %s", draft_id, body[:120])
         else:
-            message = await _post_message(channel_id, body)
+            img_path = row["image_path"] if "image_path" in row.keys() else None
+            message = await _post_message(channel_id, body, image_path=img_path)
             message_id = str(message["id"])
             for emoji in SEEDED_EMOJIS:
                 try:

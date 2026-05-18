@@ -405,9 +405,16 @@ class TwitterBot:
                         tweet_perma = str(perm)
                     created_at = await time_el.get_attribute("datetime") or ""
 
-                has_media = await tweet_el.query_selector(
-                    '[data-testid="tweetPhoto"], [data-testid="videoComponent"]'
-                ) is not None
+                # Capture the first photo URL (twimg.com background image of
+                # tweetPhoto). Skip if it's a video — we can't reuse video,
+                # only photos can be re-attached to our own tweet.
+                image_url = ""
+                photo_el = await tweet_el.query_selector('[data-testid="tweetPhoto"] img')
+                if photo_el is not None:
+                    src = await photo_el.get_attribute("src")
+                    if src and "twimg.com" in src:
+                        image_url = src
+                has_media = bool(image_url)
 
                 posts.append(
                     {
@@ -420,6 +427,7 @@ class TwitterBot:
                         "views": views,
                         "has_media": has_media,
                         "url": tweet_perma,
+                        "image_url": image_url,
                     }
                 )
         except Exception as exc:

@@ -278,6 +278,11 @@ def _insert_observations(
             with conn:
                 count = 0
                 for obs in observations:
+                    # Hard requirement: no image, no ingest. Twitter engagement
+                    # heavily favors image posts; learning from text-only posts
+                    # would teach a style that under-performs on X.
+                    if not obs.has_image:
+                        continue
                     row = to_db_row(obs)
                     score = placeholder_viral_score(obs)
                     is_viral = 1 if score >= viral_threshold else 0
@@ -285,10 +290,11 @@ def _insert_observations(
                         "INSERT OR IGNORE INTO reaction_observations ("
                         "source, author_handle, author_tier, content, posted_at, "
                         "likes, retweets, replies, impressions, has_image, raw_url, "
-                        "topic_hint, viral_score, is_viral) "
+                        "topic_hint, image_url, content_length, viral_score, is_viral) "
                         "VALUES (:source, :author_handle, :author_tier, :content, "
                         ":posted_at, :likes, :retweets, :replies, :impressions, "
-                        ":has_image, :raw_url, :topic_hint, :viral_score, :is_viral)",
+                        ":has_image, :raw_url, :topic_hint, :image_url, "
+                        ":content_length, :viral_score, :is_viral)",
                         {**row, "viral_score": score, "is_viral": is_viral},
                     )
                     count += cur.rowcount if cur.rowcount > 0 else 0

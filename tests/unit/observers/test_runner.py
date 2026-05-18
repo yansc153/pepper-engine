@@ -43,7 +43,7 @@ def _obs(source: str, raw_url: str, likes: int = 1) -> Observation:
         retweets=0,
         replies=0,
         impressions=None,
-        has_image=False,
+        has_image=True,  # required: runner now drops has_image=False at ingest
         raw_url=raw_url,
         topic_hint=None,
     )

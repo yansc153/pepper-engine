@@ -86,9 +86,17 @@ class XListFinanceAdapter:
     ) -> list[Observation]:
         out: list[Observation] = []
         for raw in raw_posts[: self._max_posts]:
+            # Normalize the twitter_bot keys to from_scrape_dict's expected ones
+            # and enforce image-required: drop tweets without a photo URL.
+            normalized = dict(raw)
+            normalized.setdefault("has_image", bool(raw.get("image_url") or raw.get("has_media")))
+            normalized.setdefault("author_handle", raw.get("handle", ""))
+            if not normalized.get("image_url"):
+                logger.debug("x_list_finance skip text-only tweet: %s", raw.get("url"))
+                continue
             try:
                 obs = from_scrape_dict(
-                    raw, source=self.name, tier=self._tier_default  # type: ignore[arg-type]
+                    normalized, source=self.name, tier=self._tier_default  # type: ignore[arg-type]
                 )
             except ObservationValidationError as exc:
                 logger.debug("x_list_finance skip raw: %s", exc)

@@ -28,9 +28,16 @@ from observers.base import (
 logger = logging.getLogger(__name__)
 
 XUEQIU_FEED_URL = (
+    # category=-1 = 头条 (curated long-form columns). With type=11 it filters to
+    # articles (专栏长文), not short status updates. Articles always carry an image
+    # and 1.5k-3k Chinese chars — exactly the "rewritable original" we need.
     "https://xueqiu.com/v4/statuses/public_timeline_by_category.json"
-    "?since_id=-1&max_id=-1&count=20&category=105"  # 105 = 沪深 (real A-share status posts)
+    "?since_id=-1&max_id=-1&count=20&category=-1&type=11"
 )
+
+# Filter threshold: skip xueqiu items shorter than this — we only want long-form
+# columns/articles as rewritable source material, not short status updates.
+MIN_CONTENT_LENGTH = 250  # ~250 Chinese chars ≈ 750 bytes; enough for "column-grade" posts
 XUEQIU_HOME_URL = "https://xueqiu.com/"
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
@@ -202,6 +209,17 @@ class XueqiuAdapter:
         ).strip()
         if not content:
             raise ObservationValidationError("empty content")
+        if len(content) < MIN_CONTENT_LENGTH:
+            raise ObservationValidationError(
+                f"too short ({len(content)} < {MIN_CONTENT_LENGTH}) — only long-form columns are usable"
+            )
+
+        # Extract image: xueqiu uses first_pic for thumbnail, pic for full;
+        # both come back as URL strings (or absent on text-only posts which we skip).
+        first_pic = raw.get("first_pic") or raw.get("pic") or ""
+        image_url_str: str | None = first_pic if first_pic and first_pic.startswith("http") else None
+        if not image_url_str:
+            raise ObservationValidationError("no image — only image-bearing posts are usable")
 
         # xueqiu created_at is epoch milliseconds; topic items may lack it
         created_raw = raw.get("created_at") or raw.get("timeBefore")
@@ -223,8 +241,9 @@ class XueqiuAdapter:
                 "retweets": raw.get("retweet_count", 0),
                 "replies": raw.get("reply_count", 0),
                 "impressions": raw.get("view_count"),
-                "has_image": has_image,
+                "has_image": True,           # we already required image_url above
                 "raw_url": url,
+                "image_url": image_url_str,
             },
             source=self.name,
             tier=self._tier_default,  # type: ignore[arg-type]

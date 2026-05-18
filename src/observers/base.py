@@ -79,6 +79,7 @@ class Observation:
     has_image: bool
     raw_url: str
     topic_hint: TopicLane | None
+    image_url: str | None = None      # source post's image URL, downloaded later
 
     def __post_init__(self) -> None:
         if self.source not in _VALID_SOURCES:
@@ -126,6 +127,7 @@ _FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "has_image": ("has_image", "has_media", "with_image"),
     "raw_url": ("raw_url", "url", "tweet_url", "link"),
     "topic_hint": ("topic_hint", "topic", "lane"),
+    "image_url": ("image_url", "image", "pic_url", "first_pic", "media_url"),
 }
 
 
@@ -189,6 +191,7 @@ def from_scrape_dict(d: dict[str, Any], source: SourceName, tier: AuthorTier) ->
         has_image=bool(_pick(d, "has_image", False)),
         raw_url=str(raw_url),
         topic_hint=_pick(d, "topic_hint"),
+        image_url=(str(_pick(d, "image_url")) if _pick(d, "image_url") else None),
     )
 
 
@@ -212,6 +215,8 @@ def to_db_row(obs: Observation) -> dict[str, Any]:
         "has_image": 1 if obs.has_image else 0,
         "raw_url": obs.raw_url,
         "topic_hint": obs.topic_hint,
+        "image_url": obs.image_url,
+        "content_length": len(obs.content or ""),
     }
 
 
@@ -231,6 +236,11 @@ def from_db_row(row: dict[str, Any]) -> Observation:
             has_image=bool(row["has_image"]),
             raw_url=row["raw_url"],
             topic_hint=row.get("topic_hint") if hasattr(row, "get") else row["topic_hint"],
+            image_url=(
+                row["image_url"]
+                if (hasattr(row, "keys") and "image_url" in row.keys())
+                else None
+            ),
         )
     except KeyError as exc:
         raise ObservationValidationError(f"missing column in db row: {exc.args[0]}") from exc

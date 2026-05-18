@@ -10,8 +10,9 @@ PATH=/usr/local/bin:/usr/bin:/bin
 # Observe sources hourly
 0 *  * * *           root /app/scripts/cron_wrap.sh observe       /app/scripts/run.sh observe
 
-# Post window: 22:00-15:00 UTC every 2h (= 06:00-23:00 CST)
-0 22-23,0-15/2 * * * root /app/scripts/cron_wrap.sh post          /app/scripts/run.sh post
+# Post 12x/day, every ~2 hours UTC, covering CST 06:00-04:00 prime hours:
+# 22 23 00 02 04 06 08 10 12 14 16 18 UTC = CST 06,07,08,10,12,14,16,18,20,22,00,02
+0 22,23,0,2,4,6,8,10,12,14,16,18 * * * root /app/scripts/cron_wrap.sh post  /app/scripts/run.sh post
 
 # Discord approval gate poller every 5 min
 */5 * * * *          root /app/scripts/cron_wrap.sh discord_poll  /app/scripts/run.sh discord_poll
