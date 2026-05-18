@@ -40,12 +40,17 @@ DEFAULT_USER_AGENT = (
 
 
 def _unwrap_status(raw: dict[str, Any]) -> dict[str, Any]:
-    """`public_timeline_by_category` wraps each post inside `data` (JSON string)
-    or `original_status` (already a dict). Return the real status object.
+    """Return the real status object from a public_timeline_by_category wrapper.
+
+    Priority:
+      1. `original_status` — the canonical un-reposted status (preferred)
+      2. `data` (dict or JSON-string) — fallback; usually a topic-card shape
+      3. raw — already unwrapped
     """
     if not isinstance(raw, dict):
         return {}
-    # `data` is often a JSON-encoded string of the status
+    if isinstance(raw.get("original_status"), dict) and raw["original_status"]:
+        return raw["original_status"]
     data = raw.get("data")
     if isinstance(data, str) and data.strip().startswith("{"):
         try:
@@ -54,9 +59,6 @@ def _unwrap_status(raw: dict[str, Any]) -> dict[str, Any]:
             pass
     if isinstance(data, dict) and data:
         return data
-    if isinstance(raw.get("original_status"), dict):
-        return raw["original_status"]
-    # already unwrapped
     return raw
 
 

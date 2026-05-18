@@ -31,12 +31,15 @@ if str(_SRC_DIR) not in sys.path:
 from observers.base import Observation, SourceAdapter, to_db_row  # noqa: E402
 from observers.futu_adapter import FutuAdapter  # noqa: E402
 from observers.news_flash_adapter import NewsFlashAdapter  # noqa: E402
-from observers.xueqiu_adapter import XueqiuAdapter  # noqa: E402
+from observers.x_list_finance_adapter import XListFinanceAdapter  # noqa: E402
+from observers.xueqiu_adapter import XUEQIU_FEED_URL, XueqiuAdapter  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 # Adapter names this runner owns (Twitter list adapters belong to S5b).
-EXTERNAL_ADAPTER_NAMES: frozenset[str] = frozenset({"xueqiu", "futu", "news_flash"})
+EXTERNAL_ADAPTER_NAMES: frozenset[str] = frozenset(
+    {"xueqiu", "futu", "news_flash", "x_list_finance"}
+)
 
 # Default lookback if caller doesn't pass an explicit since.
 DEFAULT_LOOKBACK_HOURS = 6
@@ -61,8 +64,8 @@ AdapterFactory = Callable[[Mapping[str, Any]], SourceAdapter]
 
 def _build_xueqiu(cfg: Mapping[str, Any]) -> SourceAdapter:
     return XueqiuAdapter(
-        feed_url=cfg.get("feed_url") or "https://xueqiu.com/v4/statuses/topic.json",
-        tier_default=int(cfg.get("tier_default", 2)),
+        feed_url=cfg.get("feed_url") or XUEQIU_FEED_URL,
+        tier_default=int(cfg.get("tier_default", 0)),
         max_posts_per_fetch=int(cfg.get("max_posts_per_fetch") or 30),
     )
 
@@ -70,7 +73,7 @@ def _build_xueqiu(cfg: Mapping[str, Any]) -> SourceAdapter:
 def _build_futu(cfg: Mapping[str, Any]) -> SourceAdapter:
     return FutuAdapter(
         feed_url=cfg.get("feed_url") or "https://q.futunn.com/nnq/recommend",
-        tier_default=int(cfg.get("tier_default", 2)),
+        tier_default=int(cfg.get("tier_default", 0)),
         max_posts_per_fetch=int(cfg.get("max_posts_per_fetch") or 30),
     )
 
@@ -82,10 +85,19 @@ def _build_news_flash(cfg: Mapping[str, Any]) -> SourceAdapter:
     )
 
 
+def _build_x_list_finance(cfg: Mapping[str, Any]) -> SourceAdapter:
+    return XListFinanceAdapter(
+        list_url=cfg.get("list_url") or "https://x.com/i/lists/2056032482127175889",
+        tier_default=int(cfg.get("tier_default", 1)),
+        max_posts_per_fetch=int(cfg.get("max_posts_per_fetch") or 30),
+    )
+
+
 ADAPTER_BUILDERS: dict[str, AdapterFactory] = {
     "xueqiu": _build_xueqiu,
     "futu": _build_futu,
     "news_flash": _build_news_flash,
+    "x_list_finance": _build_x_list_finance,
 }
 
 

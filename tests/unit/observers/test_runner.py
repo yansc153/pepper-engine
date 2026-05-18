@@ -67,10 +67,14 @@ class _FakeAdapter:
         return True
 
 
-def test_external_adapter_names_excludes_twitter() -> None:
-    assert "x_list_finance" not in EXTERNAL_ADAPTER_NAMES
+def test_external_adapter_names_includes_x_list_finance() -> None:
+    """Contract flipped: x_list_finance is now runner-owned (was deferred to S5b
+    that never wired it). x_list_general remains excluded — still no list URL."""
+    assert "x_list_finance" in EXTERNAL_ADAPTER_NAMES
     assert "x_list_general" not in EXTERNAL_ADAPTER_NAMES
-    assert EXTERNAL_ADAPTER_NAMES == frozenset({"xueqiu", "futu", "news_flash"})
+    assert EXTERNAL_ADAPTER_NAMES == frozenset(
+        {"xueqiu", "futu", "news_flash", "x_list_finance"}
+    )
 
 
 def test_placeholder_viral_score_weights() -> None:
