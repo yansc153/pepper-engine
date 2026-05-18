@@ -62,6 +62,7 @@ AdapterName = Literal[
     "futu",
     "news_flash",
     "eastmoney_guba",
+    "benzinga",
 ]
 
 
@@ -91,6 +92,12 @@ class SourceConfig(BaseModel):
     )
     min_reads: int | None = Field(
         default=None, ge=0, description="eastmoney_guba: minimum thread read count filter"
+    )
+    tickers: list[str] | None = Field(
+        default=None, description="benzinga: US stock tickers to scrape"
+    )
+    min_content_length: int | None = Field(
+        default=None, gt=0, description="benzinga: minimum article body length"
     )
 
     @model_validator(mode="after")

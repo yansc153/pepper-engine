@@ -42,6 +42,26 @@ adapters:
     rate_limit_per_hour: 30
     tier_default: 0
 
+  - name: benzinga
+    enabled: true     # US-stock topic source: Benzinga per-ticker article pages
+    tickers:
+      - AAPL
+      - MSFT
+      - GOOGL
+      - AMZN
+      - NVDA
+      - META
+      - TSLA
+      - AMD
+      - AVGO
+      - NFLX
+      - COIN
+      - MSTR
+    rate_limit_per_hour: 6
+    tier_default: 0
+    max_posts_per_fetch: 15
+    min_content_length: 300
+
   - name: eastmoney_guba
     enabled: true     # A-shares topic source: 东方财富股吧 hot threads with images
     stock_codes:
