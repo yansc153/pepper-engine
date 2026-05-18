@@ -61,6 +61,7 @@ AdapterName = Literal[
     "xueqiu",
     "futu",
     "news_flash",
+    "eastmoney_guba",
 ]
 
 
@@ -84,6 +85,12 @@ class SourceConfig(BaseModel):
     sources: list[str] | None = Field(default=None, description="Sub-source ids")
     click_refresh: bool = Field(
         default=False, description="Futu: click '推荐' tab before scrape"
+    )
+    stock_codes: list[str] | None = Field(
+        default=None, description="eastmoney_guba: stock forum codes to scrape"
+    )
+    min_reads: int | None = Field(
+        default=None, ge=0, description="eastmoney_guba: minimum thread read count filter"
     )
 
     @model_validator(mode="after")

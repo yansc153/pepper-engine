@@ -18,6 +18,8 @@ SA_COOKIE = Path("/app/secrets/seekingalpha_cookies.json")
 SA_URL = "https://seekingalpha.com/stock-ideas/ai-tech-stocks"
 GUBA_URL = "https://guba.eastmoney.com/list,zssh000001,99.html"
 WSB_URL = "https://www.reddit.com/r/wallstreetbets/hot.json?limit=10"
+STOCKS_SUB_URL = "https://www.reddit.com/r/stocks/hot.json?limit=10"
+STOCKTWITS_URL = "https://api.stocktwits.com/api/2/streams/symbol/AAPL.json"
 
 UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -86,13 +88,13 @@ async def probe_one(name: str, url: str, cookie_file: Path | None) -> dict:
     return report
 
 
-async def probe_wsb_json() -> dict:
+async def probe_reddit_json(name: str, url: str) -> dict:
     """Reddit .json endpoint — no Playwright needed, just httpx with realistic UA."""
     import httpx
-    report: dict = {"name": "wallstreetbets", "url": WSB_URL}
+    report: dict = {"name": name, "url": url}
     try:
         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-            resp = await client.get(WSB_URL, headers={"User-Agent": UA})
+            resp = await client.get(url, headers={"User-Agent": UA})
             report["http_status"] = resp.status_code
             if resp.status_code != 200:
                 report["body_snippet"] = resp.text[:200]
@@ -114,6 +116,32 @@ async def probe_wsb_json() -> dict:
     return report
 
 
+async def probe_stocktwits() -> dict:
+    """StockTwits public JSON — no cookie/key needed for symbol streams."""
+    import httpx
+    report: dict = {"name": "stocktwits", "url": STOCKTWITS_URL}
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.get(STOCKTWITS_URL, headers={"User-Agent": UA})
+            report["http_status"] = resp.status_code
+            if resp.status_code != 200:
+                report["body_snippet"] = resp.text[:200]
+                return report
+            data = resp.json()
+            messages = data.get("messages", [])
+            report["post_count"] = len(messages)
+            if messages:
+                first = messages[0]
+                report["first_user"] = first.get("user", {}).get("username", "")
+                report["first_body_chars"] = len(first.get("body", ""))
+                report["first_has_image"] = bool(first.get("entities", {}).get("chart"))
+                report["first_likes"] = first.get("likes", {}).get("total", 0)
+                report["first_body_snip"] = (first.get("body") or "")[:100]
+    except Exception as exc:  # noqa: BLE001
+        report["error"] = str(exc)
+    return report
+
+
 async def main() -> None:
     results = []
     print("=== Probing eastmoney guba (no cookie needed) ===")
@@ -125,13 +153,23 @@ async def main() -> None:
     print(json.dumps(results[-1], ensure_ascii=False, indent=2))
 
     print("\n=== Probing reddit /r/wallstreetbets via .json ===")
-    wsb = await probe_wsb_json()
+    wsb = await probe_reddit_json("wallstreetbets", WSB_URL)
     results.append(wsb)
     print(json.dumps(wsb, ensure_ascii=False, indent=2))
 
+    print("\n=== Probing reddit /r/stocks via .json (serious investor sub) ===")
+    rs = await probe_reddit_json("stocks_sub", STOCKS_SUB_URL)
+    results.append(rs)
+    print(json.dumps(rs, ensure_ascii=False, indent=2))
+
+    print("\n=== Probing stocktwits /streams/symbol/AAPL.json (US stock chatter) ===")
+    st = await probe_stocktwits()
+    results.append(st)
+    print(json.dumps(st, ensure_ascii=False, indent=2))
+
     print("\n=== VERDICT ===")
     for r in results:
-        if r["name"] == "wallstreetbets":
+        if r["name"] in ("wallstreetbets", "stocks_sub", "stocktwits"):
             ok = r.get("http_status") == 200 and r.get("post_count", 0) > 0
         else:
             ok = (

@@ -38,6 +38,7 @@ SourceName = Literal[
     "futu",
     "news_flash",
     "self_monitor",
+    "eastmoney_guba",
 ]
 
 TopicLane = Literal[
