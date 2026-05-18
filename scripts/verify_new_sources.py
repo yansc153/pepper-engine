@@ -47,7 +47,11 @@ async def probe_one(name: str, url: str, cookie_file: Path | None) -> dict:
                 report["error"] = f"goto: {exc}"
                 return report
 
-            await page.wait_for_load_state("networkidle", timeout=8000)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=4000)
+            except Exception:  # noqa: BLE001 — many sites keep XHRs pinging forever
+                pass
+            await page.wait_for_timeout(1500)  # let initial render settle
             report["title"] = await page.title()
             body_text = await page.locator("body").inner_text()
             report["body_chars"] = len(body_text)
