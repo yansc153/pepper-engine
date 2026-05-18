@@ -33,7 +33,7 @@ def _seed_post_and_entries(db: Path, entry_ids: list[int]) -> int:
                     "author_tier, content, posted_at, likes, retweets, replies, "
                     "has_image, raw_url, viral_score, is_viral) VALUES "
                     "(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (eid, "xueqiu", "a", 1, "x", "2026-05-01 00:00:00",
+                    (eid, "x_list_finance", "a", 1, "x", "2026-05-01 00:00:00",
                      0, 0, 0, 0, f"https://x/{eid}", 0.0, 1),
                 )
                 conn.execute(

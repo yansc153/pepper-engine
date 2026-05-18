@@ -147,15 +147,6 @@ SESSION_DIR = DATA_DIR / "browser_session"
 X_COOKIE_PATH = Path(
     _env_str("PEPPER_X_COOKIE_PATH", str(SESSION_DIR / f"{ACCOUNT_LABEL}_x_cookies.json"))
 ).expanduser()
-XUEQIU_COOKIE_PATH = Path(
-    _env_str("PEPPER_XUEQIU_COOKIE_PATH", str(SESSION_DIR / f"{ACCOUNT_LABEL}_xueqiu_cookies.json"))
-).expanduser()
-
-# ── Logged-in market sources ──
-SOURCE_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) pepperbot-market/1.0"
-XUEQIU_HOME_URL = "https://xueqiu.com/"
-SCRAPE_LOOKBACK_HOURS = 24
-SCRAPE_TAKE_PER_SOURCE = 10
 
 # ── Image download ──
 IMAGE_CACHE_DIR = PROJECT_ROOT / "tmp_images"

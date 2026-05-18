@@ -32,7 +32,7 @@ def db_path(tmp_path) -> Path:
 
 
 def _obs(source: str, raw_url: str, likes: int = 1) -> Observation:
-    tier = 0 if source == "news_flash" else 2
+    tier = 0 if source == "eastmoney_guba" else 2
     return Observation(
         source=source,  # type: ignore[arg-type]
         author_handle="x",
@@ -67,18 +67,15 @@ class _FakeAdapter:
         return True
 
 
-def test_external_adapter_names_includes_x_list_finance() -> None:
-    """Contract flipped: x_list_finance is now runner-owned (was deferred to S5b
-    that never wired it). x_list_general remains excluded — still no list URL."""
-    assert "x_list_finance" in EXTERNAL_ADAPTER_NAMES
-    assert "x_list_general" not in EXTERNAL_ADAPTER_NAMES
+def test_external_adapter_names_two_source_pipeline() -> None:
+    """Two-source pipeline: x_list_finance (learn) + eastmoney_guba (content)."""
     assert EXTERNAL_ADAPTER_NAMES == frozenset(
-        {"xueqiu", "futu", "news_flash", "x_list_finance", "eastmoney_guba"}
+        {"x_list_finance", "eastmoney_guba"}
     )
 
 
 def test_placeholder_viral_score_weights() -> None:
-    o = _obs("xueqiu", "https://x.com/1", likes=10)
+    o = _obs("x_list_finance", "https://x.com/1", likes=10)
     # likes 10 * 0.5 + retweets 0 + replies 0 -> 5
     assert placeholder_viral_score(o) == pytest.approx(5.0)
 
@@ -86,10 +83,10 @@ def test_placeholder_viral_score_weights() -> None:
 @pytest.mark.asyncio
 async def test_run_adapters_inserts_observations(db_path) -> None:
     adapter = _FakeAdapter(
-        "xueqiu",
+        "x_list_finance",
         observations=[
-            _obs("xueqiu", "https://xueqiu.com/1/100"),
-            _obs("xueqiu", "https://xueqiu.com/1/101"),
+            _obs("x_list_finance", "https://xueqiu.com/1/100"),
+            _obs("x_list_finance", "https://xueqiu.com/1/101"),
         ],
     )
     report = await run_adapters(
@@ -114,10 +111,10 @@ async def test_run_adapters_inserts_observations(db_path) -> None:
 @pytest.mark.asyncio
 async def test_run_adapters_dedupes_on_raw_url(db_path) -> None:
     adapter = _FakeAdapter(
-        "xueqiu",
+        "x_list_finance",
         observations=[
-            _obs("xueqiu", "https://xueqiu.com/1/200"),
-            _obs("xueqiu", "https://xueqiu.com/1/200"),  # dup
+            _obs("x_list_finance", "https://xueqiu.com/1/200"),
+            _obs("x_list_finance", "https://xueqiu.com/1/200"),  # dup
         ],
     )
     report = await run_adapters(
@@ -129,9 +126,9 @@ async def test_run_adapters_dedupes_on_raw_url(db_path) -> None:
 @pytest.mark.asyncio
 async def test_run_adapters_failure_does_not_block_others(db_path) -> None:
     good = _FakeAdapter(
-        "xueqiu", observations=[_obs("xueqiu", "https://xueqiu.com/1/300")]
+        "x_list_finance", observations=[_obs("x_list_finance", "https://xueqiu.com/1/300")]
     )
-    bad = _FakeAdapter("futu", raise_exc=True)
+    bad = _FakeAdapter("eastmoney_guba", raise_exc=True)
     report = await run_adapters(
         [good, bad],
         since=datetime(2020, 1, 1, tzinfo=timezone.utc),
@@ -144,8 +141,8 @@ async def test_run_adapters_failure_does_not_block_others(db_path) -> None:
 
 @pytest.mark.asyncio
 async def test_run_adapters_writes_source_health(db_path) -> None:
-    good = _FakeAdapter("xueqiu", observations=[])
-    bad = _FakeAdapter("futu", raise_exc=True)
+    good = _FakeAdapter("x_list_finance", observations=[])
+    bad = _FakeAdapter("eastmoney_guba", raise_exc=True)
     await run_adapters(
         [good, bad],
         since=datetime(2020, 1, 1, tzinfo=timezone.utc),
@@ -160,10 +157,10 @@ async def test_run_adapters_writes_source_health(db_path) -> None:
         ).fetchall()
     }
     conn.close()
-    assert rows["xueqiu"]["consecutive_failures"] == 0
-    assert rows["xueqiu"]["last_success_at"] is not None
-    assert rows["futu"]["consecutive_failures"] >= 1
-    assert "boom" in (rows["futu"]["last_error"] or "")
+    assert rows["x_list_finance"]["consecutive_failures"] == 0
+    assert rows["x_list_finance"]["last_success_at"] is not None
+    assert rows["eastmoney_guba"]["consecutive_failures"] >= 1
+    assert "boom" in (rows["eastmoney_guba"]["last_error"] or "")
 
 
 @pytest.mark.asyncio
@@ -177,8 +174,8 @@ async def test_run_adapters_empty_returns_zero_report() -> None:
 @pytest.mark.asyncio
 async def test_run_adapters_marks_viral_threshold(db_path) -> None:
     # likes=1000 -> 500 score; threshold default 500 -> is_viral=1
-    viral = _obs("xueqiu", "https://xueqiu.com/1/v1", likes=1000)
-    adapter = _FakeAdapter("xueqiu", observations=[viral])
+    viral = _obs("x_list_finance", "https://xueqiu.com/1/v1", likes=1000)
+    adapter = _FakeAdapter("x_list_finance", observations=[viral])
     await run_adapters(
         [adapter],
         since=datetime(2020, 1, 1, tzinfo=timezone.utc),

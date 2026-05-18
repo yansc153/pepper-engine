@@ -2,10 +2,8 @@
 
 Two modes (env ``DISCORD_APPROVAL_MODE``):
   - ``manual`` (default): mark status='approved' and stop. User publishes
-    manually in their X client. ``self_monitor`` 6h cron cross-references
-    the posted tweet back to the draft via content hash and transitions
-    status='published' + fills tweet_url.
-  - ``auto`` (legacy): call publisher, write tweet_url, status='published'.
+    manually in their X client.
+  - ``auto``: call publisher, write tweet_url, status='published'.
 
 S7 owns ``src.publisher``; lazy import so manual mode never requires it.
 """
@@ -58,10 +56,7 @@ async def handle_approval(draft_id: int, conn: sqlite3.Connection) -> None:
 
     mode = os.environ.get("DISCORD_APPROVAL_MODE", "manual").lower()
     if mode == "manual":
-        LOGGER.info(
-            "draft %s approved (manual mode); waiting for self_monitor binding",
-            draft_id,
-        )
+        LOGGER.info("draft %s approved (manual mode); publish manually", draft_id)
         return
 
     tweet_url = await _post_tweet(row["content"], row["image_path"])

@@ -41,16 +41,8 @@ def test_load_real_configs_succeeds() -> None:
     """The shipped yaml files all validate."""
     cfg = load_all_configs(REPO_ROOT)
     assert isinstance(cfg, AppConfig)
-    # spot check: 6 adapters total (benzinga removed)
     names = {a.name for a in cfg.sources.adapters}
-    assert names == {
-        "x_list_finance",
-        "x_list_general",
-        "xueqiu",
-        "futu",
-        "news_flash",
-        "eastmoney_guba",
-    }
+    assert names == {"x_list_finance", "eastmoney_guba"}
 
 
 def test_app_config_is_importable_as_module_object() -> None:
@@ -64,27 +56,21 @@ def test_app_config_is_importable_as_module_object() -> None:
     assert "sources" in cfg.model_dump()
 
 
-def test_futu_adapter_has_click_refresh_true() -> None:
-    cfg = load_all_configs(REPO_ROOT)
-    futu = next(a for a in cfg.sources.adapters if a.name == "futu")
-    assert futu.click_refresh is True
-
-
 # ---------------------------------------------------------------------------
 # failure cases
 # ---------------------------------------------------------------------------
 
 
 def test_sources_missing_cookie_env_key_raises(repo_clone: Path) -> None:
-    """xueqiu adapter without cookie_env_key must blow up at load time."""
+    """x_list_finance without cookie_env_key must blow up at load time."""
     (repo_clone / "config" / "sources.yaml").write_text(
         """
 adapters:
-  - name: xueqiu
+  - name: x_list_finance
     enabled: true
-    feed_url: "https://xueqiu.com/v4/statuses/topic.json"
-    rate_limit_per_hour: 24
-    tier_default: 2
+    list_url: "https://x.com/i/lists/2056032482127175889"
+    rate_limit_per_hour: 12
+    tier_default: 1
 """,
         encoding="utf-8",
     )
@@ -208,13 +194,14 @@ def test_sources_yaml_is_standalone_validatable() -> None:
     data = {
         "adapters": [
             {
-                "name": "news_flash",
+                "name": "eastmoney_guba",
                 "enabled": True,
-                "rate_limit_per_hour": 30,
+                "rate_limit_per_hour": 6,
                 "tier_default": 0,
-                "sources": ["eastmoney_kuaixun"],
+                "homepage_url": "https://guba.eastmoney.com/",
+                "min_content_length": 1500,
             }
         ]
     }
     cfg = SourcesYaml.model_validate(data)
-    assert cfg.adapters[0].name == "news_flash"
+    assert cfg.adapters[0].name == "eastmoney_guba"

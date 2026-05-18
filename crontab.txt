@@ -7,21 +7,23 @@ PATH=/usr/local/bin:/usr/bin:/bin
 #   - non-zero exit fires webhook alert with last 10 log lines
 #   - 14-day log retention
 
-# Morning batch: 23:00 UTC = 07:00 Beijing CST. Observe 20 articles then
-# generate up to 20 drafts, all pushed to Discord for user review. User
-# wakes up to 20 drafts ready to triage.
-30 22 * * * root /app/scripts/cron_wrap.sh morning_observe /app/scripts/run.sh observe
-0 23 * * *  root /app/scripts/cron_wrap.sh morning_batch   /app/scripts/run.sh batch_post
+# observe runs BOTH adapters (x_list_finance for KOL voice learning,
+# eastmoney_guba for article content). Pull 3x/day to keep KOL feed fresh.
+0 0 * * *   root /app/scripts/cron_wrap.sh observe_midnight /app/scripts/run.sh observe
+0 8 * * *   root /app/scripts/cron_wrap.sh observe_midday   /app/scripts/run.sh observe
+30 22 * * * root /app/scripts/cron_wrap.sh morning_observe  /app/scripts/run.sh observe
 
-# Discord approval gate poller every 5 min (so user reactions are processed
-# throughout the day).
-*/5 * * * *          root /app/scripts/cron_wrap.sh discord_poll  /app/scripts/run.sh discord_poll
+# Morning batch: 23:00 UTC = 07:00 CST. Generate up to 20 drafts from
+# observed material; push to Discord for triage.
+0 23 * * *  root /app/scripts/cron_wrap.sh morning_batch    /app/scripts/run.sh batch_post
 
-# Self-monitor (cross-reference wild posts) every 6h
-0 */6 * * *          root /app/scripts/cron_wrap.sh self_monitor  /app/scripts/run.sh self_monitor
+# Discord approval gate poller every 5 min.
+*/5 * * * * root /app/scripts/cron_wrap.sh discord_poll     /app/scripts/run.sh discord_poll
 
-# Daily mine -> review at 16:00 UTC = 00:00 CST (chained under one lock)
-0 16 * * *           root /app/scripts/cron_wrap.sh nightly       bash -c '/app/scripts/run.sh mine && /app/scripts/run.sh review'
+# Daily mine -> review at 16:00 UTC = 00:00 CST (chained under one lock).
+# mine = distill viral KOL observations into technique_entries + weave edges.
+# review = score yesterday's posts, EMA-update technique success scores.
+0 16 * * *  root /app/scripts/cron_wrap.sh nightly          bash -c '/app/scripts/run.sh mine && /app/scripts/run.sh review'
 
-# Weekly full remine: Sunday 04:00 UTC = 12:00 CST Sun
-0 4 * * 0            root /app/scripts/cron_wrap.sh remine        /app/scripts/run.sh remine
+# Weekly full remine: Sunday 04:00 UTC = 12:00 CST Sun.
+0 4 * * 0   root /app/scripts/cron_wrap.sh remine           /app/scripts/run.sh remine

@@ -23,7 +23,7 @@ def _insert_obs(db: Path, obs_id: int, author: str = "alice") -> None:
                 "has_image, raw_url, viral_score, is_viral) VALUES "
                 "(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
-                    obs_id, "xueqiu", author, 1, f"c{obs_id}", "2026-05-01 00:00:00",
+                    obs_id, "x_list_finance", author, 1, f"c{obs_id}", "2026-05-01 00:00:00",
                     100, 0, 0, 0, f"https://example.com/{obs_id}", 100.0, 1,
                 ),
             )

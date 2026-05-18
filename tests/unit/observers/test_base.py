@@ -117,7 +117,7 @@ def test_from_scrape_dict_unknown_source() -> None:
 
 def test_from_scrape_dict_missing_posted_at() -> None:
     with pytest.raises(ObservationValidationError):
-        from_scrape_dict({"text": "x", "url": "u"}, source="xueqiu", tier=2)
+        from_scrape_dict({"text": "x", "url": "u"}, source="x_list_finance", tier=2)
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ def test_db_round_trip_preserves_equality() -> None:
 
 def test_db_round_trip_with_news_flash_tier_zero() -> None:
     obs = _make_obs(
-        source="news_flash",
+        source="eastmoney_guba",
         author_tier=0,
         author_handle="eastmoney",
         has_image=False,
@@ -172,7 +172,7 @@ def test_to_db_row_has_image_is_int() -> None:
 # ---------------------------------------------------------------------------
 def test_source_adapter_protocol_is_runtime_checkable() -> None:
     class FakeAdapter:
-        name = "xueqiu"
+        name = "x_list_finance"
         cookie_env_key = "XUEQIU_COOKIE_FILE"
         rate_limit_per_hour = 24
 
@@ -188,7 +188,7 @@ def test_source_adapter_protocol_is_runtime_checkable() -> None:
 
 def test_source_adapter_rejects_missing_method() -> None:
     class IncompleteAdapter:
-        name = "xueqiu"
+        name = "x_list_finance"
         cookie_env_key = "X"
         rate_limit_per_hour = 1
         # no fetch_latest / health_check
@@ -208,4 +208,4 @@ def test_observation_type_hints_resolve() -> None:
 
 def test_from_db_row_missing_column_raises() -> None:
     with pytest.raises(ObservationValidationError):
-        from_db_row({"source": "xueqiu"})  # nowhere near complete
+        from_db_row({"source": "x_list_finance"})  # nowhere near complete

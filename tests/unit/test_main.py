@@ -54,12 +54,12 @@ def _run(argv: list[str], capsys: pytest.CaptureFixture[str]) -> tuple[int, dict
 # ---------------------------------------------------------------------------
 
 
-def test_help_lists_eight_commands(capsys: pytest.CaptureFixture[str]) -> None:
+def test_help_lists_commands(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc:
         main_module.main(["--help"])
     assert exc.value.code == 0
     help_text = capsys.readouterr().out
-    for cmd in ("observe", "post", "discord_poll", "self_monitor",
+    for cmd in ("observe", "post", "batch_post", "discord_poll",
                 "mine", "review", "remine", "test"):
         assert cmd in help_text
 
@@ -273,43 +273,6 @@ def test_discord_poll_returns_advanced_count(monkeypatch: pytest.MonkeyPatch,
     assert code == 0
     assert summary["drafts_advanced"] == 5
     poll_mock.assert_awaited_once()
-
-
-# ---------------------------------------------------------------------------
-# self_monitor
-# ---------------------------------------------------------------------------
-
-
-def test_self_monitor_calls_reconcile(monkeypatch: pytest.MonkeyPatch,
-                                      capsys: pytest.CaptureFixture[str]) -> None:
-    result = type("R", (), {"scanned": 10, "bound": 3, "wild": 1, "errors": 0})()
-    adapter = MagicMock()
-    adapter.reconcile = AsyncMock(return_value=result)
-    cls = MagicMock(return_value=adapter)
-    _install_module(monkeypatch, "src.observers.self_monitor_adapter", SelfMonitorAdapter=cls)
-
-    code, summary = _run(["self_monitor"], capsys)
-    assert code == 0
-    assert summary["bound"] == 3
-    assert summary["wild"] == 1
-    adapter.reconcile.assert_awaited_once()
-
-
-def test_self_monitor_misconfig_exits_nonzero_and_alerts(monkeypatch: pytest.MonkeyPatch,
-                                                         capsys: pytest.CaptureFixture[str]) -> None:
-    """Codex Round-2 fix: TWITTER_HANDLE unset is misconfig (silent failure
-    before this fix), must exit non-zero and trigger alert so cron is loud."""
-    adapter = MagicMock()
-    adapter.reconcile = AsyncMock(side_effect=RuntimeError("TWITTER_HANDLE env var unset"))
-    cls = MagicMock(return_value=adapter)
-    _install_module(monkeypatch, "src.observers.self_monitor_adapter", SelfMonitorAdapter=cls)
-    alert_mock = MagicMock(return_value=True)
-    _install_module(monkeypatch, "src.alerting", alert=alert_mock)
-
-    code, summary = _run(["self_monitor"], capsys)
-    assert code == 1, "misconfig must surface as non-zero exit, not silent skip"
-    assert summary["error"] == "self_monitor_misconfig"
-    alert_mock.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

@@ -34,7 +34,7 @@ def _insert_obs(db: Path, *, obs_id: int = 1, content: str = "test", viral: int 
                 "(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     obs_id,
-                    "xueqiu",
+                    "x_list_finance",
                     "alice",
                     1,
                     content,

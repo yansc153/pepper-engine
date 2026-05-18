@@ -1,14 +1,15 @@
 """External observer runner.
 
-Reads ``config/sources.yaml``, instantiates each enabled non-Twitter adapter,
-fans out ``fetch_latest()`` calls concurrently, computes a placeholder viral
-score, and writes results into ``reaction_observations`` (de-duplicated by
+Reads ``config/sources.yaml``, instantiates each enabled adapter, fans out
+``fetch_latest()`` calls concurrently, computes a placeholder viral score,
+and writes results into ``reaction_observations`` (de-duplicated by
 ``raw_url``). Per-adapter health is recorded in ``source_health``.
 
-The x_list_finance / x_list_general adapters are owned by S5b and skipped
-here; this runner handles xueqiu / futu / news_flash.
+Two-source pipeline:
+  - x_list_finance (tier 1): KOL voice → distilled into technique_entries
+  - eastmoney_guba (tier 0): article topics/content for drafts
 
-Public entry point: ``await run_once(...)`` — used by S11 orchestrator.
+Public entry point: ``await run_once(...)``.
 """
 
 from __future__ import annotations
@@ -30,16 +31,12 @@ if str(_SRC_DIR) not in sys.path:
 
 from observers.base import Observation, SourceAdapter, to_db_row  # noqa: E402
 from observers.eastmoney_guba_adapter import EastmoneyGubaAdapter  # noqa: E402
-from observers.futu_adapter import FutuAdapter  # noqa: E402
-from observers.news_flash_adapter import NewsFlashAdapter  # noqa: E402
 from observers.x_list_finance_adapter import XListFinanceAdapter  # noqa: E402
-from observers.xueqiu_adapter import XUEQIU_FEED_URL, XueqiuAdapter  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-# Adapter names this runner owns (Twitter list adapters belong to S5b).
 EXTERNAL_ADAPTER_NAMES: frozenset[str] = frozenset(
-    {"xueqiu", "futu", "news_flash", "x_list_finance", "eastmoney_guba"}
+    {"x_list_finance", "eastmoney_guba"}
 )
 
 # Default lookback if caller doesn't pass an explicit since.
@@ -63,29 +60,6 @@ class RunReport:
 AdapterFactory = Callable[[Mapping[str, Any]], SourceAdapter]
 
 
-def _build_xueqiu(cfg: Mapping[str, Any]) -> SourceAdapter:
-    return XueqiuAdapter(
-        feed_url=cfg.get("feed_url") or XUEQIU_FEED_URL,
-        tier_default=int(cfg.get("tier_default", 0)),
-        max_posts_per_fetch=int(cfg.get("max_posts_per_fetch") or 30),
-    )
-
-
-def _build_futu(cfg: Mapping[str, Any]) -> SourceAdapter:
-    return FutuAdapter(
-        feed_url=cfg.get("feed_url") or "https://q.futunn.com/nnq/recommend",
-        tier_default=int(cfg.get("tier_default", 0)),
-        max_posts_per_fetch=int(cfg.get("max_posts_per_fetch") or 30),
-    )
-
-
-def _build_news_flash(cfg: Mapping[str, Any]) -> SourceAdapter:
-    return NewsFlashAdapter(
-        tier_default=int(cfg.get("tier_default", 0)),
-        max_posts_per_fetch=int(cfg.get("max_posts_per_fetch") or 30),
-    )
-
-
 def _build_x_list_finance(cfg: Mapping[str, Any]) -> SourceAdapter:
     return XListFinanceAdapter(
         list_url=cfg.get("list_url") or "https://x.com/i/lists/2056032482127175889",
@@ -105,9 +79,6 @@ def _build_eastmoney_guba(cfg: Mapping[str, Any]) -> SourceAdapter:
 
 
 ADAPTER_BUILDERS: dict[str, AdapterFactory] = {
-    "xueqiu": _build_xueqiu,
-    "futu": _build_futu,
-    "news_flash": _build_news_flash,
     "x_list_finance": _build_x_list_finance,
     "eastmoney_guba": _build_eastmoney_guba,
 }

@@ -138,7 +138,7 @@ def test_insert_select_each_table(db: Path) -> None:
             (7, 100),
         )
         conn.execute(
-            "INSERT INTO source_health (adapter_name) VALUES (?)", ("xueqiu",)
+            "INSERT INTO source_health (adapter_name) VALUES (?)", ("x_list_finance",)
         )
         conn.execute(
             "INSERT INTO circuit_breaker (scope, reason) VALUES (?,?)",

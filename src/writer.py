@@ -27,6 +27,7 @@ import json
 import logging
 import re
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -277,7 +278,8 @@ def build_fact_spine(topic_candidate: dict[str, Any]) -> dict[str, Any]:
 def retrieve_techniques(ctx: dict[str, Any], k: int = 5) -> list[dict[str, Any]]:
     """Pull Top-K technique entries from the pattern miner.
 
-    Stub-safe: if `src.miner` doesn't exist or `retrieve` raises, return [].
+    Builds a `RetrievalContext` dataclass from the loose dict the writer
+    pipeline carries. Stub-safe: if miner missing or retrieve raises, return [].
     """
     try:
         import importlib
@@ -287,12 +289,40 @@ def retrieve_techniques(ctx: dict[str, Any], k: int = 5) -> list[dict[str, Any]]
     fn = getattr(miner, "retrieve", None)
     if fn is None:
         return []
+    # Build the typed context; if the dataclass module isn't importable
+    # (e.g. test monkeypatches src.miner with a bare module), fall through
+    # to the dict and let the miner stub deal with it.
+    request: Any
     try:
-        result = fn(ctx, k=k)
+        from src.miner.types import RetrievalContext
+        request = RetrievalContext(
+            topic_lane=str(ctx.get("topic_lane") or ""),
+            post_hour_utc=int(ctx.get("post_hour_utc", datetime.now(timezone.utc).hour)),
+            persona=str(ctx.get("persona") or ""),
+            fact_spine_keywords=list(ctx.get("fact_spine_keywords") or []),
+            avoid_recent_pattern_ids=list(ctx.get("avoid_recent_pattern_ids") or []),
+            content_mode=ctx.get("content_mode"),
+        )
+    except (ImportError, Exception):  # noqa: BLE001
+        request = ctx
+    try:
+        result = fn(request, k=k)
     except Exception as exc:  # noqa: BLE001 — miner failure must not kill writer
         logger.warning("miner.retrieve failed: %s", exc)
         return []
-    return list(result or [])
+    out: list[dict[str, Any]] = []
+    for entry in result or []:
+        if isinstance(entry, dict):
+            out.append(entry)
+            continue
+        out.append({
+            "id": getattr(entry, "id", None),
+            "hook_pattern": getattr(entry, "hook_pattern", ""),
+            "hook": getattr(entry, "hook_pattern", ""),
+            "example": getattr(entry, "hook_example", ""),
+            "source_excerpt": getattr(entry, "hook_example", ""),
+        })
+    return out
 
 
 def build_angle_card(

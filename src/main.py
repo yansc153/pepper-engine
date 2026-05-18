@@ -193,32 +193,6 @@ async def _cmd_discord_poll() -> CommandResult:
     return 0, {"drafts_advanced": int(advanced)}
 
 
-async def _cmd_self_monitor() -> CommandResult:
-    """Cross-reference the main account timeline back into drafts / wild_posts."""
-    from src.observers.self_monitor_adapter import SelfMonitorAdapter
-
-    adapter = SelfMonitorAdapter()
-    try:
-        result = await adapter.reconcile()
-    except RuntimeError as exc:
-        # Missing config (TWITTER_HANDLE etc.) is a misconfig, not "nothing to do".
-        # Exit non-zero so cron_wrap.sh fires an alert.
-        LOGGER.error("self_monitor disabled: %s", exc)
-        try:
-            from src.alerting import alert
-            alert("self_monitor cannot run", context={"error": str(exc)})
-        except Exception as alert_exc:  # noqa: BLE001
-            LOGGER.error("alerting failed: %s", alert_exc)
-        return 1, {"error": "self_monitor_misconfig", "detail": str(exc)}
-
-    return 0, {
-        "scanned": result.scanned,
-        "bound": result.bound,
-        "wild": result.wild,
-        "errors": result.errors,
-    }
-
-
 async def _cmd_mine() -> CommandResult:
     """Daily distill of today's viral observations + nightly weave."""
     from datetime import datetime, timezone
@@ -270,7 +244,6 @@ async def _cmd_test() -> CommandResult:
     for mod_name in (
         "src.database",
         "src.observers.runner",
-        "src.observers.self_monitor_adapter",
         "selector",
         "src.writer",
         "src.discord.bot",
@@ -304,7 +277,6 @@ COMMANDS: dict[str, CommandFn] = {
     "post": _cmd_post,
     "batch_post": _cmd_batch_post,
     "discord_poll": _cmd_discord_poll,
-    "self_monitor": _cmd_self_monitor,
     "mine": _cmd_mine,
     "review": _cmd_review,
     "remine": _cmd_remine,

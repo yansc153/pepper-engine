@@ -46,7 +46,7 @@ def test_author_p80_computes_from_history(tmp_db: Path) -> None:
                     "(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         i,
-                        "xueqiu",
+                        "x_list_finance",
                         "alice",
                         1,
                         f"c{i}",

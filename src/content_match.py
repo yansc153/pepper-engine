@@ -1,7 +1,7 @@
 """Content normalization + hashing + fuzzy matching.
 
-Shared by writer (writes drafts.content_hash) and self_monitor_adapter
-(matches X-tweets back to drafts via 3-stage lookup):
+Shared by writer (writes drafts.content_hash) and any downstream matcher
+that needs the 3-stage lookup:
 
     Stage 1: exact match on content_hash    (fast, O(1) via index)
     Stage 2: hash of normalized text        (handles whitespace/punct drift)

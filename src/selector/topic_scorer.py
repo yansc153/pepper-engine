@@ -162,9 +162,8 @@ def _load_recent_observations(
         "likes, retweets, replies, impressions, has_image, raw_url, topic_hint, "
         "viral_score FROM reaction_observations "
         "WHERE observed_at >= ? AND author_tier >= 0 "
-        # tier>=0 (was >0): xueqiu/futu now ship tier=0 so they contribute
-        # topic candidates without polluting the technique-learning corpus
-        # (distiller still filters tier>0 for shape extraction).
+        # tier>=0: guba ships tier=0 (topic/content), x_list_finance ships
+        # tier=1 (also learned by distiller, which filters tier>0).
         "ORDER BY observed_at DESC",
         (cutoff.strftime("%Y-%m-%d %H:%M:%S"),),
     ).fetchall()

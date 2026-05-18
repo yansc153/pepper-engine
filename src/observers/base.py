@@ -27,17 +27,12 @@ __all__ = [
     "from_db_row",
 ]
 
-# tier 0 = news_flash (facts only, never enters learning corpus).
-# tier 1/2/3 = KOL layers: top / mid / general.
+# tier 0 = content/topic source (eastmoney_guba) — facts only, NOT learned.
+# tier 1 = KOL voice source (x_list_finance) — distilled into technique_entries.
 AuthorTier = Literal[0, 1, 2, 3]
 
 SourceName = Literal[
     "x_list_finance",
-    "x_list_general",
-    "xueqiu",
-    "futu",
-    "news_flash",
-    "self_monitor",
     "eastmoney_guba",
 ]
 

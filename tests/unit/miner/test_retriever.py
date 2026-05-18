@@ -48,7 +48,7 @@ def _insert(
                 "author_tier, content, posted_at, likes, retweets, replies, "
                 "has_image, raw_url, viral_score, is_viral) VALUES "
                 "(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (obs_id, "xueqiu", "a", 1, "x", "2026-05-01 00:00:00",
+                (obs_id, "x_list_finance", "a", 1, "x", "2026-05-01 00:00:00",
                  100, 0, 0, 0, f"https://x/{obs_id}", 100.0, 1),
             )
             conn.execute(

@@ -57,10 +57,6 @@ class ConfigError(Exception):
 
 AdapterName = Literal[
     "x_list_finance",
-    "x_list_general",
-    "xueqiu",
-    "futu",
-    "news_flash",
     "eastmoney_guba",
 ]
 
@@ -82,10 +78,6 @@ class SourceConfig(BaseModel):
         default=None, description="Env var name pointing at cookie JSON path"
     )
     max_posts_per_fetch: int | None = Field(default=None, gt=0)
-    sources: list[str] | None = Field(default=None, description="Sub-source ids")
-    click_refresh: bool = Field(
-        default=False, description="Futu: click '推荐' tab before scrape"
-    )
     homepage_url: str | None = Field(
         default=None, description="eastmoney_guba: 股吧 homepage URL for 精选 feed"
     )
@@ -98,9 +90,7 @@ class SourceConfig(BaseModel):
 
     @model_validator(mode="after")
     def _require_cookie_for_authed_sources(self) -> "SourceConfig":
-        # Adapters that need a session cookie MUST declare cookie_env_key.
-        needs_cookie = {"x_list_finance", "x_list_general", "xueqiu", "futu"}
-        if self.name in needs_cookie and not self.cookie_env_key:
+        if self.name == "x_list_finance" and not self.cookie_env_key:
             raise ValueError(
                 f"adapter '{self.name}' requires cookie_env_key"
             )
@@ -265,7 +255,6 @@ class AppConfig(BaseModel):
     compliance: ComplianceLexicon
     political: PoliticalLexicon
     kol_finance: KolList
-    kol_general: KolList
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +269,6 @@ _FILES = {
     "compliance": "config/compliance_lexicon.yaml",
     "political": "config/political_lexicon.yaml",
     "kol_finance": "config/kol_list_finance.yaml",
-    "kol_general": "config/kol_list_general.yaml",
 }
 
 _MODELS: dict[str, type[BaseModel]] = {
@@ -290,7 +278,6 @@ _MODELS: dict[str, type[BaseModel]] = {
     "compliance": ComplianceLexicon,
     "political": PoliticalLexicon,
     "kol_finance": KolList,
-    "kol_general": KolList,
 }
 
 
@@ -356,7 +343,6 @@ def load_all_configs(root: Path) -> AppConfig:
         compliance=loaded["compliance"],  # type: ignore[arg-type]
         political=loaded["political"],  # type: ignore[arg-type]
         kol_finance=loaded["kol_finance"],  # type: ignore[arg-type]
-        kol_general=loaded["kol_general"],  # type: ignore[arg-type]
     )
 
 
