@@ -20,6 +20,13 @@ GUBA_URL = "https://guba.eastmoney.com/list,zssh000001,99.html"
 WSB_URL = "https://www.reddit.com/r/wallstreetbets/hot.json?limit=10"
 STOCKS_SUB_URL = "https://www.reddit.com/r/stocks/hot.json?limit=10"
 STOCKTWITS_URL = "https://api.stocktwits.com/api/2/streams/symbol/AAPL.json"
+# New candidates (likely VPS-friendly: no Cloudflare/PerimeterX)
+SUBSTACK_URLS = [
+    ("doomberg",   "https://doomberg.substack.com/feed"),         # geopolitics+energy+macro
+    ("themacrotourist", "https://themacrotourist.substack.com/feed"),  # macro/markets
+    ("netinterest", "https://netinterest.substack.com/feed"),     # finance industry deep dives
+]
+HN_TOP_URL = "https://hacker-news.firebaseio.com/v0/topstories.json"
 
 UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -116,6 +123,61 @@ async def probe_reddit_json(name: str, url: str) -> dict:
     return report
 
 
+async def probe_substack(name: str, feed_url: str) -> dict:
+    """Substack RSS feed — public, no anti-bot."""
+    import httpx
+    report: dict = {"name": f"substack:{name}", "url": feed_url}
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.get(feed_url, headers={"User-Agent": UA})
+            report["http_status"] = resp.status_code
+            if resp.status_code != 200:
+                report["body_snippet"] = resp.text[:200]
+                return report
+            body = resp.text
+            report["body_chars"] = len(body)
+            # RSS-style: count <item> tags (each post)
+            import re
+            items = re.findall(r"<item>", body)
+            report["post_count"] = len(items)
+            # First title via simple regex
+            title_match = re.search(r"<title><!\[CDATA\[(.*?)\]\]></title>", body)
+            report["first_title"] = (title_match.group(1) if title_match else "")[:80]
+            # Detect image presence
+            report["has_images_in_feed"] = "<img" in body or "enclosure" in body
+    except Exception as exc:  # noqa: BLE001
+        report["error"] = str(exc)
+    return report
+
+
+async def probe_hn_top() -> dict:
+    """Hacker News Firebase API — 100% public, no auth, no rate limits."""
+    import httpx
+    report: dict = {"name": "hackernews", "url": HN_TOP_URL}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(HN_TOP_URL, headers={"User-Agent": UA})
+            report["http_status"] = resp.status_code
+            if resp.status_code != 200:
+                return report
+            ids = resp.json()
+            report["post_count"] = len(ids)
+            # Sample top item for shape check
+            if ids:
+                item = await client.get(
+                    f"https://hacker-news.firebaseio.com/v0/item/{ids[0]}.json",
+                    headers={"User-Agent": UA},
+                )
+                if item.status_code == 200:
+                    d = item.json()
+                    report["first_title"] = (d.get("title") or "")[:80]
+                    report["first_score"] = d.get("score", 0)
+                    report["first_descendants"] = d.get("descendants", 0)
+    except Exception as exc:  # noqa: BLE001
+        report["error"] = str(exc)
+    return report
+
+
 async def probe_stocktwits() -> dict:
     """StockTwits public JSON — no cookie/key needed for symbol streams."""
     import httpx
@@ -167,9 +229,21 @@ async def main() -> None:
     results.append(st)
     print(json.dumps(st, ensure_ascii=False, indent=2))
 
+    print("\n=== Probing Substack financial newsletters ===")
+    for name, url in SUBSTACK_URLS:
+        sub = await probe_substack(name, url)
+        results.append(sub)
+        print(json.dumps(sub, ensure_ascii=False, indent=2))
+
+    print("\n=== Probing Hacker News top stories ===")
+    hn = await probe_hn_top()
+    results.append(hn)
+    print(json.dumps(hn, ensure_ascii=False, indent=2))
+
     print("\n=== VERDICT ===")
     for r in results:
-        if r["name"] in ("wallstreetbets", "stocks_sub", "stocktwits"):
+        name = r["name"]
+        if name in ("wallstreetbets", "stocks_sub", "stocktwits", "hackernews") or name.startswith("substack:"):
             ok = r.get("http_status") == 200 and r.get("post_count", 0) > 0
         else:
             ok = (
