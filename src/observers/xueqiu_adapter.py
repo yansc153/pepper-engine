@@ -10,9 +10,11 @@ mocked with ``respx`` in tests.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,16 +30,24 @@ from observers.base import (
 logger = logging.getLogger(__name__)
 
 XUEQIU_FEED_URL = (
-    # category=-1 = 头条 (curated long-form columns). With type=11 it filters to
-    # articles (专栏长文), not short status updates. Articles always carry an image
-    # and 1.5k-3k Chinese chars — exactly the "rewritable original" we need.
+    # Step 1: headline list. Each item carries only a topic-card stub with a
+    # `target` link pointing to the actual article. Step 2 below hydrates each
+    # via show.json to pull the real body+image.
     "https://xueqiu.com/v4/statuses/public_timeline_by_category.json"
     "?since_id=-1&max_id=-1&count=20&category=-1&type=11"
 )
+XUEQIU_SHOW_URL = "https://xueqiu.com/v4/statuses/show.json"
 
 # Filter threshold: skip xueqiu items shorter than this — we only want long-form
 # columns/articles as rewritable source material, not short status updates.
 MIN_CONTENT_LENGTH = 250  # ~250 Chinese chars ≈ 750 bytes; enough for "column-grade" posts
+
+# Two-stage fetch tuning
+HYDRATION_CONCURRENCY = 5      # concurrent show.json calls
+HYDRATION_TIMEOUT = 10.0       # per-call timeout (sec)
+_TARGET_ID_RE = re.compile(r"/(\d+)/?$")  # extract trailing status_id from target
+_HTML_TAG_RE = re.compile(r"<[^>]+>")     # strip HTML tags from show.json body
+_HTML_IMG_RE = re.compile(r'<img[^>]+src="([^"]+)"', re.I)
 XUEQIU_HOME_URL = "https://xueqiu.com/"
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
@@ -158,15 +168,60 @@ class XueqiuAdapter:
         }
 
     async def _fetch_payload(self) -> dict[str, Any]:
+        """Two-stage fetch: headlines list → hydrate each via show.json.
+
+        The headline endpoint returns topic-card stubs (title+target+pic
+        only — no body, no real user). show.json returns the full status
+        object with text body, image, author, engagement counters. We
+        parallelize the hydration calls under a semaphore.
+        """
         cookies = self._load_cookies()
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.get(
-                self._feed_url,
-                cookies=cookies,
-                headers=self._headers(),
-            )
+        async with httpx.AsyncClient(
+            timeout=self._timeout, cookies=cookies, headers=self._headers()
+        ) as client:
+            # Stage 1: headline list
+            resp = await client.get(self._feed_url)
             resp.raise_for_status()
-            return resp.json()
+            headlines = resp.json()
+            items = headlines.get("list") or headlines.get("statuses") or []
+
+            # Extract status_ids from each item's target ("/user_id/status_id")
+            status_ids: list[int] = []
+            for item in items[: self._max_posts]:
+                unwrapped = _unwrap_status(item)
+                target = unwrapped.get("target") or item.get("target") or ""
+                m = _TARGET_ID_RE.search(target)
+                if m:
+                    status_ids.append(int(m.group(1)))
+
+            if not status_ids:
+                logger.info("xueqiu headlines returned 0 valid targets")
+                return {"list": []}
+
+            # Stage 2: hydrate each via show.json (concurrent, bounded)
+            sem = asyncio.Semaphore(HYDRATION_CONCURRENCY)
+
+            async def _fetch_one(sid: int) -> dict[str, Any] | None:
+                async with sem:
+                    try:
+                        r = await client.get(
+                            XUEQIU_SHOW_URL,
+                            params={"id": sid},
+                            timeout=HYDRATION_TIMEOUT,
+                        )
+                        r.raise_for_status()
+                        return r.json()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("xueqiu show id=%s failed: %s", sid, exc)
+                        return None
+
+            results = await asyncio.gather(*[_fetch_one(s) for s in status_ids])
+            articles = [a for a in results if a]
+            logger.info(
+                "xueqiu hydrated %d/%d articles from headlines",
+                len(articles), len(status_ids),
+            )
+            return {"list": articles}
 
     def _parse_payload(
         self, payload: dict[str, Any], since: datetime
@@ -198,15 +253,21 @@ class XueqiuAdapter:
         pic = raw.get("pic_sizes") or raw.get("pic") or raw.get("first_pic") or ""
         has_image = bool(pic) and pic != ""
 
-        # Content priority: text (status) → description (topic) → title (headline)
-        content = (
+        # Content from show.json comes as HTML (`<p>...</p><img...><p>...`).
+        # Strip tags for the body we store; extract first <img src=...> for image.
+        raw_text = (
             raw.get("text")
             or raw.get("description")
             or raw.get("title")
             or raw.get("topic_desc")
             or raw.get("topic_title")
             or ""
-        ).strip()
+        )
+        # Pull first image from inline HTML BEFORE stripping tags
+        inline_img_match = _HTML_IMG_RE.search(raw_text) if raw_text else None
+        inline_img = inline_img_match.group(1) if inline_img_match else ""
+        content = _HTML_TAG_RE.sub(" ", raw_text).strip()
+        content = re.sub(r"\s+", " ", content)
         if not content:
             raise ObservationValidationError("empty content")
         if len(content) < MIN_CONTENT_LENGTH:
@@ -214,10 +275,11 @@ class XueqiuAdapter:
                 f"too short ({len(content)} < {MIN_CONTENT_LENGTH}) — only long-form columns are usable"
             )
 
-        # Extract image: xueqiu uses first_pic for thumbnail, pic for full;
-        # both come back as URL strings (or absent on text-only posts which we skip).
-        first_pic = raw.get("first_pic") or raw.get("pic") or ""
-        image_url_str: str | None = first_pic if first_pic and first_pic.startswith("http") else None
+        # Image priority: first_pic field → pic field → first <img> in HTML body
+        first_pic = raw.get("first_pic") or raw.get("pic") or inline_img or ""
+        image_url_str: str | None = (
+            first_pic if first_pic and first_pic.startswith("http") else None
+        )
         if not image_url_str:
             raise ObservationValidationError("no image — only image-bearing posts are usable")
 
