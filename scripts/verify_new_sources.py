@@ -27,6 +27,16 @@ SUBSTACK_URLS = [
     ("netinterest", "https://netinterest.substack.com/feed"),     # finance industry deep dives
 ]
 HN_TOP_URL = "https://hacker-news.firebaseio.com/v0/topstories.json"
+# US-stock candidates — old-school financial news + community sites
+US_STOCK_URLS = [
+    ("yahoo_finance",  "https://finance.yahoo.com/quote/AAPL/community"),
+    ("marketwatch",    "https://www.marketwatch.com/investing/stock/aapl"),
+    ("cnbc_quote",     "https://www.cnbc.com/quotes/AAPL"),
+    ("investing_com",  "https://www.investing.com/equities/apple-computer-inc"),
+    ("finviz",         "https://finviz.com/quote.ashx?t=AAPL"),
+    ("benzinga",       "https://www.benzinga.com/quote/AAPL"),
+    ("tipranks",       "https://www.tipranks.com/stocks/aapl/forecast"),
+]
 
 UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -118,6 +128,36 @@ async def probe_reddit_json(name: str, url: str) -> dict:
                     first.get("preview") or first.get("post_hint") == "image"
                 )
                 report["first_selftext_chars"] = len(first.get("selftext", ""))
+    except Exception as exc:  # noqa: BLE001
+        report["error"] = str(exc)
+    return report
+
+
+async def probe_html(name: str, url: str) -> dict:
+    """Generic HTML GET probe with realistic UA. Detect Cloudflare/anti-bot challenge."""
+    import httpx
+    report: dict = {"name": name, "url": url}
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.get(
+                url,
+                headers={
+                    "User-Agent": UA,
+                    "Accept": "text/html,application/xhtml+xml",
+                    "Accept-Language": "en-US,en;q=0.9",
+                },
+            )
+            report["http_status"] = resp.status_code
+            body = resp.text
+            report["body_chars"] = len(body)
+            report["body_snippet"] = body[:150]
+            haystack = body.lower()
+            report["challenge_hit"] = any(
+                kw in haystack for kw in [
+                    "just a moment", "access denied", "captcha",
+                    "checking your browser", "px-captcha",
+                ]
+            )
     except Exception as exc:  # noqa: BLE001
         report["error"] = str(exc)
     return report
@@ -240,11 +280,26 @@ async def main() -> None:
     results.append(hn)
     print(json.dumps(hn, ensure_ascii=False, indent=2))
 
+    print("\n=== Probing US-stock candidates (Yahoo/MW/CNBC/Investing/Finviz/Benzinga/TipRanks) ===")
+    for name, url in US_STOCK_URLS:
+        r = await probe_html(name, url)
+        results.append(r)
+        # short line per result, not full json
+        print(f"  {name}: status={r.get('http_status')} body={r.get('body_chars')} "
+              f"challenge={r.get('challenge_hit')} snip='{r.get('body_snippet','')[:80]}'")
+
     print("\n=== VERDICT ===")
+    us_names = {n for n, _ in US_STOCK_URLS}
     for r in results:
         name = r["name"]
         if name in ("wallstreetbets", "stocks_sub", "stocktwits", "hackernews") or name.startswith("substack:"):
             ok = r.get("http_status") == 200 and r.get("post_count", 0) > 0
+        elif name in us_names:
+            ok = (
+                r.get("http_status") in (200, 304)
+                and not r.get("challenge_hit", False)
+                and r.get("body_chars", 0) > 5000  # real page, not redirect
+            )
         else:
             ok = (
                 r.get("http_status") in (200, 304)
