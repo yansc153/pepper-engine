@@ -103,7 +103,9 @@ class XueqiuAdapter:
             try:
                 ctx = await browser.new_context(user_agent=DEFAULT_USER_AGENT)
                 try:
-                    ctx.add_cookies(await asyncio.to_thread(self._load_cookies))
+                    cookies = await asyncio.to_thread(self._load_cookies)
+                    await ctx.add_cookies(cookies)
+                    logger.info("xueqiu loaded %d cookies", len(cookies))
                 except (FileNotFoundError, TypeError) as exc:
                     logger.warning("xueqiu cookies not loaded: %s", exc)
 
@@ -149,10 +151,27 @@ class XueqiuAdapter:
                         count = n
                         break
 
+                title = await page.title()
                 logger.info(
                     "xueqiu page loaded, selector=%s match=%d, title=%s",
-                    used, count, await page.title(),
+                    used, count, title,
                 )
+                if count == 0:
+                    probe = await page.evaluate(
+                        """() => {
+                            const cls = new Set();
+                            for (const el of document.querySelectorAll('div, article, section, li')) {
+                                if (el.children.length >= 1 && el.innerText && el.innerText.length > 30) {
+                                    if (el.className && typeof el.className === 'string') {
+                                        cls.add(el.className.split(' ')[0]);
+                                    }
+                                    if (cls.size >= 30) break;
+                                }
+                            }
+                            return Array.from(cls).slice(0, 30);
+                        }"""
+                    )
+                    logger.info("xueqiu DOM probe candidate classes: %s", probe)
 
                 if cards is None:
                     return results

@@ -155,6 +155,24 @@ class FutuAdapter:
                     "futu page loaded, selector=%s match=%d, page_title=%s",
                     used_selector, raw_count, await page.title(),
                 )
+                if raw_count == 0:
+                    # DOM probe: dump first 20 class names of any element with text
+                    # so we can deduce the actual feed selector.
+                    probe = await page.evaluate(
+                        """() => {
+                            const cls = new Set();
+                            for (const el of document.querySelectorAll('div, article, section, li')) {
+                                if (el.children.length >= 1 && el.innerText && el.innerText.length > 30) {
+                                    if (el.className && typeof el.className === 'string') {
+                                        cls.add(el.className.split(' ')[0]);
+                                    }
+                                    if (cls.size >= 30) break;
+                                }
+                            }
+                            return Array.from(cls).slice(0, 30);
+                        }"""
+                    )
+                    logger.info("futu DOM probe candidate classes: %s", probe)
                 count = min(raw_count, self._max_posts)
                 for idx in range(count):
                     card = cards.nth(idx)
