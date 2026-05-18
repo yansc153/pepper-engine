@@ -240,13 +240,21 @@ def light_distill(observation_id: int) -> int | None:
 
 
 def full_distill(since: datetime) -> list[int]:
-    """Backstop pass: distill every viral obs older than `since` lacking an entry."""
+    """Distill every learn-worthy obs since `since` that lacks an entry.
+
+    Learn-worthy = is_viral=1 (any source) OR author_tier>=1 (KOL voice,
+    always distilled regardless of engagement — that's the whole point of
+    a curated KOL list).
+    """
     conn = get_conn()
     try:
         rows = conn.execute(
             "SELECT id FROM reaction_observations "
-            "WHERE is_viral = 1 AND distilled_at IS NULL AND observed_at >= ?",
-            (since.astimezone(timezone.utc).isoformat(),),
+            "WHERE (is_viral = 1 OR author_tier >= 1) "
+            "  AND distilled_at IS NULL AND observed_at >= ?",
+            # DB stores observed_at as 'YYYY-MM-DD HH:MM:SS' (no T, no tz).
+            # Match that format or string-compare silently drops everything.
+            (since.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),),
         ).fetchall()
     finally:
         conn.close()
