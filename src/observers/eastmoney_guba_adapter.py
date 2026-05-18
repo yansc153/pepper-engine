@@ -44,17 +44,28 @@ logger = logging.getLogger(__name__)
 GUBA_HOMEPAGE_URL = "https://guba.eastmoney.com/"
 GUBA_ORIGIN = "https://guba.eastmoney.com"
 
-# Detail URL pattern from probe doc: /news,{stock_code},{post_id}.html
-DETAIL_URL_RE = re.compile(r"/news,\d+,\d+\.html$")
+# Real article URL pattern (verified via live probe 2026-05-18):
+# href="//caifuhao.eastmoney.com/news/<long_numeric_id>"
+# These are 财富号 (caifuhao) long-form articles surfaced in the 精选 tab.
+DETAIL_URL_RE = re.compile(
+    r"caifuhao\.eastmoney\.com/news/\d+", re.IGNORECASE
+)
 
-# Inline body image CDN — per probe, guba bodies host pictures here.
-INLINE_IMAGE_HOST_RE = re.compile(r"gbres\.dfcfw\.com/Files/picture/", re.IGNORECASE)
+# Inline body image CDN — caifuhao articles use this CDN for embedded pics.
+INLINE_IMAGE_HOST_RE = re.compile(
+    r"gbres\.dfcfw\.com/Files/(?:picture|iimage)/", re.IGNORECASE
+)
 
 # Selector for the rendered feed container on the homepage.
 MAINLIST_SELECTOR = "#mainlist"
-# Card anchor selector inside the mainlist — we deliberately scope to links
-# whose href matches the detail URL pattern so we ignore nav/sidebar links.
-CARD_ANCHOR_SELECTOR = "#mainlist a[href*='/news,']"
+# Wrapper class for the 精选 tab content — appears only after the tab is
+# activated (JS click) and React renders the panel.
+JINGXUAN_WRAPPER_SELECTOR = ".jingxuan_list_wraper"
+# Anchor selector once the 精选 panel is up. The wrapper holds title links,
+# image previews, and stock-quote anchors — we only want article links.
+CARD_ANCHOR_SELECTOR = (
+    f"{JINGXUAN_WRAPPER_SELECTOR} a[href*='caifuhao.eastmoney.com/news/']"
+)
 
 # Detail body container — primary selector first, fallbacks after.
 BODY_SELECTORS: tuple[str, ...] = (
@@ -193,14 +204,34 @@ class EastmoneyGubaAdapter:
                     timeout=self._page_timeout_ms,
                     wait_until="domcontentloaded",
                 )
+                # Let React hydrate the initial 广场 panel.
+                await page.wait_for_timeout(3500)
+
+                # Activate 精选 tab via JS evaluate — overlay blocks normal
+                # page.click(); JS click hits the underlying handler directly.
+                await page.evaluate(
+                    """() => {
+                        for (const s of document.querySelectorAll(
+                            '.tab_header li.tab span'
+                        )) {
+                            if (s.textContent.trim() === '精选') {
+                                s.closest('li').click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    }"""
+                )
+
+                # Wait for the 精选 panel to render its first article anchor.
                 try:
                     await page.wait_for_selector(
-                        f"{MAINLIST_SELECTOR} a[href*='/news,']",
+                        CARD_ANCHOR_SELECTOR,
                         timeout=self._mainlist_timeout_ms,
                     )
                 except Exception as exc:  # noqa: BLE001
                     logger.info(
-                        "guba homepage mainlist did not populate: %s", exc
+                        "guba 精选 panel did not populate: %s", exc
                     )
                     return []
 
@@ -324,12 +355,12 @@ class EastmoneyGubaAdapter:
             return ""
         if href.startswith("//"):
             href = "https:" + href
-        if href.startswith("/"):
+        elif href.startswith("/"):
             href = GUBA_ORIGIN + href
         if not href.startswith("http"):
             return ""
-        # Strip query/fragment for matching, keep canonical form.
-        path = href.split("?")[0].split("#")[0]
-        if not DETAIL_URL_RE.search(path):
+        # Strip query/fragment, keep canonical form.
+        clean = href.split("?")[0].split("#")[0]
+        if not DETAIL_URL_RE.search(clean):
             return ""
-        return path
+        return clean
