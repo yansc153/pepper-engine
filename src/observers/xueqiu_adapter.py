@@ -39,6 +39,27 @@ DEFAULT_USER_AGENT = (
 )
 
 
+def _unwrap_status(raw: dict[str, Any]) -> dict[str, Any]:
+    """`public_timeline_by_category` wraps each post inside `data` (JSON string)
+    or `original_status` (already a dict). Return the real status object.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    # `data` is often a JSON-encoded string of the status
+    data = raw.get("data")
+    if isinstance(data, str) and data.strip().startswith("{"):
+        try:
+            return json.loads(data)
+        except json.JSONDecodeError:
+            pass
+    if isinstance(data, dict) and data:
+        return data
+    if isinstance(raw.get("original_status"), dict):
+        return raw["original_status"]
+    # already unwrapped
+    return raw
+
+
 class XueqiuAdapter:
     """Adapter for Xueqiu's hot-topic feed.
 
@@ -76,11 +97,14 @@ class XueqiuAdapter:
         items = payload.get("list") or payload.get("statuses") or []
         if items:
             first = items[0]
+            # public_timeline_by_category wraps the real status; unwrap it
+            unwrapped = _unwrap_status(first)
             logger.info(
-                "xueqiu item keys=%s | first.id=%s first.text_snippet=%s",
+                "xueqiu item wrapped_keys=%s | unwrapped_keys=%s user=%s text_snip=%s",
                 list(first.keys()),
-                first.get("id"),
-                str(first.get("text", first.get("description", "")))[:80],
+                list(unwrapped.keys())[:15] if unwrapped else [],
+                (unwrapped.get("user", {}).get("screen_name") if unwrapped else None),
+                str(unwrapped.get("text", unwrapped.get("description", "")))[:80] if unwrapped else "",
             )
         return self._parse_payload(payload, since)
 
@@ -141,8 +165,9 @@ class XueqiuAdapter:
         items = payload.get("list") or payload.get("statuses") or []
         out: list[Observation] = []
         for raw in items[: self._max_posts]:
+            unwrapped = _unwrap_status(raw)
             try:
-                obs = self._row_to_observation(raw)
+                obs = self._row_to_observation(unwrapped)
             except ObservationValidationError as exc:
                 logger.debug("xueqiu skip row: %s", exc)
                 continue
