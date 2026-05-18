@@ -21,7 +21,10 @@ adapters:
     max_posts_per_fetch: 30
 
   - name: xueqiu
-    enabled: true
+    enabled: false   # public_timeline_by_category returns topic-streams only,
+                     # not real user statuses. To re-enable, need a new
+                     # xueqiu_columns adapter calling user_timeline.json with a
+                     # curated list of column author user_ids.
     feed_url: "https://xueqiu.com/v4/statuses/public_timeline_by_category.json?since_id=-1&max_id=-1&count=20&category=105"
     cookie_env_key: XUEQIU_COOKIE_FILE
     rate_limit_per_hour: 24
