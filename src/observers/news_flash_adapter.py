@@ -60,6 +60,7 @@ class NewsFlashAdapter:
         except Exception as exc:  # noqa: BLE001
             logger.warning("news_flash fetch failed: %s", exc)
             return []
+        self._peek(payload)
         return self._parse_payload(payload, since)
 
     async def health_check(self) -> bool:
@@ -86,6 +87,18 @@ class NewsFlashAdapter:
             resp = await client.get(self._feed_url, headers=self._headers())
             resp.raise_for_status()
             return resp.json()
+
+    def _peek(self, payload: dict[str, Any]) -> None:
+        """Temp diagnostic: log payload shape so we can see what eastmoney returns."""
+        keys = list(payload.keys()) if isinstance(payload, dict) else []
+        data = payload.get("data") if isinstance(payload, dict) else None
+        data_keys = list(data.keys()) if isinstance(data, dict) else []
+        items = self._extract_items(payload)
+        logger.info(
+            "news_flash payload top_keys=%s data_keys=%s items=%d sample=%s",
+            keys, data_keys, len(items),
+            (items[0] if items else None),
+        )
 
     def _parse_payload(
         self, payload: dict[str, Any], since: datetime

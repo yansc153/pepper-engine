@@ -27,7 +27,10 @@ from observers.base import (
 
 logger = logging.getLogger(__name__)
 
-XUEQIU_FEED_URL = "https://xueqiu.com/v4/statuses/topic.json"
+XUEQIU_FEED_URL = (
+    "https://xueqiu.com/v4/statuses/public_timeline_by_category.json"
+    "?since_id=-1&max_id=-1&count=20&category=-1"
+)
 XUEQIU_HOME_URL = "https://xueqiu.com/"
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
@@ -70,6 +73,13 @@ class XueqiuAdapter:
         except Exception as exc:  # noqa: BLE001 — adapter must not raise
             logger.warning("xueqiu fetch failed: %s", exc)
             return []
+        items = payload.get("list") or payload.get("statuses") or []
+        logger.info(
+            "xueqiu payload top_keys=%s items=%d sample_user=%s",
+            list(payload.keys()) if isinstance(payload, dict) else [],
+            len(items),
+            (items[0].get("user", {}).get("screen_name") if items else None),
+        )
         return self._parse_payload(payload, since)
 
     async def health_check(self) -> bool:

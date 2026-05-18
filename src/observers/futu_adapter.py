@@ -121,7 +121,12 @@ class FutuAdapter:
                 await page.wait_for_load_state("networkidle")
 
                 cards = page.locator("[data-feed-id], article, .feed-item")
-                count = min(await cards.count(), self._max_posts)
+                raw_count = await cards.count()
+                logger.info(
+                    "futu page loaded, selector match=%d, page_title=%s",
+                    raw_count, await page.title(),
+                )
+                count = min(raw_count, self._max_posts)
                 for idx in range(count):
                     card = cards.nth(idx)
                     try:
