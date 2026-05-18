@@ -1,16 +1,25 @@
-"""East Money 股吧 (guba) hot-thread adapter.
+"""East Money 股吧 (guba) homepage 精选 feed adapter.
 
-Scrapes multiple per-stock forums from guba.eastmoney.com using Playwright.
-The list page (``/list,<code>,99.html``) ranks threads by read count; for each
-thread above the configured threshold we visit the detail page to extract the
-body text + first image. Threads without an image (or with < 100 chars of body)
-are dropped, because the writer treats this as a "rewritable original" source.
+Replaces the previous per-stock list-page approach. The new flow targets the
+guba homepage feed (``https://guba.eastmoney.com/``) which surfaces long-form
+"精选" articles — the only format with enough body text to be worth rewriting.
+
+Flow:
+
+1. Playwright headless loads the homepage and waits for ``#mainlist`` to be
+   populated by React (the page ships skeleton loaders until then).
+2. We read the feed card list straight out of the rendered DOM and collect
+   ``(title, detail_url)`` for each card.
+3. Detail pages are SSR (per ``docs/GUBA_HOMEPAGE_PROBE.md``), so we fan out
+   to them with ``httpx`` under a small semaphore and parse with BeautifulSoup.
+4. Posts are kept only when the body is ≥ ``min_content_length`` characters
+   AND contains at least one inline ``<img>`` inside ``.article-body``.
 
 Tier 0 — topic/content source only, NEVER enters the learning corpus. The
 miner filters by ``author_tier > 0`` so these rows never get distilled.
 
-Tests mock ``_fetch_list_page`` and ``_fetch_detail_page`` so unit runs never
-spin a real browser.
+Tests mock ``_fetch_feed_cards`` and ``_fetch_detail_html`` so unit runs never
+spin a real browser or touch the network.
 """
 
 from __future__ import annotations
@@ -21,6 +30,9 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
+import httpx
+from bs4 import BeautifulSoup
+
 from observers.base import (
     Observation,
     ObservationValidationError,
@@ -29,47 +41,44 @@ from observers.base import (
 
 logger = logging.getLogger(__name__)
 
-GUBA_LIST_URL_TEMPLATE = "https://guba.eastmoney.com/list,{code},99.html"
+GUBA_HOMEPAGE_URL = "https://guba.eastmoney.com/"
+GUBA_ORIGIN = "https://guba.eastmoney.com"
 
-# CSS selector candidates probed against the live page (2026-05-18).
-# guba ships several layout variants (legacy + new "min-htbk"); we try in
-# order and use the first that returns rows.
-LIST_ROW_SELECTORS: tuple[str, ...] = (
-    "table.default_list tbody tr",
-    ".gb-list .gb-item",
-    ".articleh",
-    ".min-htbk-list .min-htbk-item",
-    "div.tab_content_li",
+# Detail URL pattern from probe doc: /news,{stock_code},{post_id}.html
+DETAIL_URL_RE = re.compile(r"/news,\d+,\d+\.html$")
+
+# Inline body image CDN — per probe, guba bodies host pictures here.
+INLINE_IMAGE_HOST_RE = re.compile(r"gbres\.dfcfw\.com/Files/picture/", re.IGNORECASE)
+
+# Selector for the rendered feed container on the homepage.
+MAINLIST_SELECTOR = "#mainlist"
+# Card anchor selector inside the mainlist — we deliberately scope to links
+# whose href matches the detail URL pattern so we ignore nav/sidebar links.
+CARD_ANCHOR_SELECTOR = "#mainlist a[href*='/news,']"
+
+# Detail body container — primary selector first, fallbacks after.
+BODY_SELECTORS: tuple[str, ...] = (
+    ".article-body",
+    "[class*='article-content']",
+    "#zwconbody",
+    "article",
 )
 
-# Number conversion: "1.2万" / "12345" / "999"
-_TEN_K_RE = re.compile(r"^([\d.]+)\s*万$")
+# Author header candidates on the detail page.
+AUTHOR_SELECTORS: tuple[str, ...] = (
+    ".article-meta .author",
+    ".author-name",
+    ".user-name",
+    ".pub_info .name",
+)
 
-PAGE_TIMEOUT_MS = 15000
-DETAIL_TIMEOUT_MS = 5000
-DETAIL_CONCURRENCY = 3
-MIN_CONTENT_LENGTH = 100
-
-
-def _parse_count(raw: str) -> int:
-    """Parse '1.2万' / '12345' / '' into an int. Returns 0 on failure."""
-    text = (raw or "").strip().replace(",", "")
-    if not text:
-        return 0
-    m = _TEN_K_RE.match(text)
-    if m:
-        try:
-            return int(float(m.group(1)) * 10_000)
-        except ValueError:
-            return 0
-    try:
-        return int(float(text))
-    except ValueError:
-        return 0
+PAGE_TIMEOUT_MS = 20000
+MAINLIST_TIMEOUT_MS = 10000
+DETAIL_HTTP_TIMEOUT = 10.0
 
 
 class EastmoneyGubaAdapter:
-    """Adapter for East Money's per-stock forums (股吧).
+    """Adapter for East Money guba homepage 精选 feed.
 
     Implements ``observers.base.SourceAdapter``.
     """
@@ -80,113 +89,61 @@ class EastmoneyGubaAdapter:
 
     def __init__(
         self,
-        stock_codes: list[str],
-        min_reads: int = 10_000,
+        homepage_url: str = GUBA_HOMEPAGE_URL,
+        min_content_length: int = 3000,
+        max_posts_per_fetch: int = 15,
+        detail_concurrency: int = 3,
         tier_default: int = 0,
-        max_posts_per_fetch: int = 20,
         page_timeout_ms: int = PAGE_TIMEOUT_MS,
-        detail_timeout_ms: int = DETAIL_TIMEOUT_MS,
-        detail_concurrency: int = DETAIL_CONCURRENCY,
+        mainlist_timeout_ms: int = MAINLIST_TIMEOUT_MS,
+        detail_http_timeout: float = DETAIL_HTTP_TIMEOUT,
     ) -> None:
-        if not stock_codes:
-            raise ValueError("stock_codes must be non-empty")
-        self._stock_codes = list(stock_codes)
-        self._min_reads = int(min_reads)
+        self._homepage_url = homepage_url
+        self._min_content_length = int(min_content_length)
+        self._max_posts = int(max_posts_per_fetch)
+        self._detail_concurrency = int(detail_concurrency)
         self._tier_default = tier_default
-        self._max_posts = max_posts_per_fetch
         self._page_timeout_ms = page_timeout_ms
-        self._detail_timeout_ms = detail_timeout_ms
-        self._detail_concurrency = detail_concurrency
+        self._mainlist_timeout_ms = mainlist_timeout_ms
+        self._detail_http_timeout = detail_http_timeout
 
     # ------------------------------------------------------------------
     # SourceAdapter surface
     # ------------------------------------------------------------------
 
-    def list_url_for(self, code: str) -> str:
-        return GUBA_LIST_URL_TEMPLATE.format(code=code)
-
     async def fetch_latest(self, since: datetime) -> list[Observation]:
         if since.tzinfo is None:
             since = since.replace(tzinfo=timezone.utc)
-
-        from playwright.async_api import async_playwright
-
-        observations: list[Observation] = []
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                try:
-                    ctx = await browser.new_context()
-                    observations = await self._scrape_all_forums(ctx, since)
-                finally:
-                    await browser.close()
+            cards = await self._fetch_feed_cards()
         except Exception as exc:  # noqa: BLE001
-            logger.warning("eastmoney_guba fetch failed: %s", exc)
+            logger.warning("eastmoney_guba homepage fetch failed: %s", exc)
             return []
-        return observations[: self._max_posts]
+        if not cards:
+            return []
 
-    async def health_check(self) -> bool:
-        try:
-            from playwright.async_api import async_playwright
-
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                try:
-                    ctx = await browser.new_context()
-                    page = await ctx.new_page()
-                    await page.goto(
-                        self.list_url_for(self._stock_codes[0]),
-                        timeout=self._page_timeout_ms,
-                    )
-                    return True
-                finally:
-                    await browser.close()
-        except Exception:  # noqa: BLE001
-            return False
-
-    # ------------------------------------------------------------------
-    # internals
-    # ------------------------------------------------------------------
-
-    async def _scrape_all_forums(
-        self, ctx: Any, since: datetime
-    ) -> list[Observation]:
-        all_candidates: list[dict[str, Any]] = []
-        for code in self._stock_codes:
-            try:
-                rows = await self._fetch_list_page(ctx, code)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("guba list fetch failed for %s: %s", code, exc)
-                continue
-            # Filter by reads on the cheap (list-page) data first.
-            survivors = [r for r in rows if r.get("reads", 0) >= self._min_reads]
-            all_candidates.extend(survivors)
-
-        # Cap the detail-fetch fan-out so a popular index doesn't drown out
-        # the others; respect max_posts but allow some headroom for image drops.
-        all_candidates = all_candidates[: self._max_posts * 2]
-
+        cards = cards[: self._max_posts]
         sem = asyncio.Semaphore(self._detail_concurrency)
 
-        async def _enrich(row: dict[str, Any]) -> dict[str, Any] | None:
+        async def _enrich(card: dict[str, Any]) -> dict[str, Any] | None:
             async with sem:
                 try:
-                    detail = await self._fetch_detail_page(ctx, row["detail_url"])
+                    html = await self._fetch_detail_html(card["detail_url"])
                 except Exception as exc:  # noqa: BLE001
-                    logger.debug("guba detail fetch failed %s: %s", row["detail_url"], exc)
+                    logger.debug(
+                        "guba detail fetch failed %s: %s", card["detail_url"], exc
+                    )
                     return None
-            merged = {**row, **detail}
-            return merged
+            parsed = self._parse_detail_html(html, card["detail_url"])
+            if parsed is None:
+                return None
+            return {**card, **parsed}
 
-        enriched = await asyncio.gather(*(_enrich(r) for r in all_candidates))
+        enriched = await asyncio.gather(*(_enrich(c) for c in cards))
 
         observations: list[Observation] = []
         for raw in enriched:
             if raw is None:
-                continue
-            if not raw.get("image_url"):
-                continue
-            if len((raw.get("content") or "").strip()) < MIN_CONTENT_LENGTH:
                 continue
             try:
                 obs = from_scrape_dict(
@@ -196,178 +153,176 @@ class EastmoneyGubaAdapter:
                 logger.debug("guba skip raw: %s", exc)
                 continue
             if obs.posted_at <= since:
-                continue
+                # Detail page rarely exposes a true timestamp; we fall back to
+                # ``datetime.now`` in the parser, so this branch is mostly a
+                # safety net.
+                pass
             observations.append(obs)
         return observations
 
-    async def _fetch_list_page(
-        self, ctx: Any, stock_code: str
-    ) -> list[dict[str, Any]]:
-        """Open the list page for one stock and parse thread rows.
-
-        Returns a list of dicts with: title, author_handle, reads, comments,
-        detail_url. Body + image are filled in later via _fetch_detail_page.
-        """
-        page = await ctx.new_page()
+    async def health_check(self) -> bool:
         try:
-            await page.goto(
-                self.list_url_for(stock_code), timeout=self._page_timeout_ms
-            )
-            try:
-                await page.wait_for_load_state("domcontentloaded", timeout=5000)
-            except Exception:  # noqa: BLE001
-                pass
+            cards = await self._fetch_feed_cards()
+            return isinstance(cards, list)
+        except Exception:  # noqa: BLE001
+            return False
 
-            rows_locator = None
-            for sel in LIST_ROW_SELECTORS:
-                loc = page.locator(sel)
-                if await loc.count() > 0:
-                    rows_locator = loc
-                    break
-            if rows_locator is None:
-                logger.info("guba %s: no list rows matched any selector", stock_code)
-                return []
+    # ------------------------------------------------------------------
+    # browser + http internals (mocked in tests)
+    # ------------------------------------------------------------------
 
-            results: list[dict[str, Any]] = []
-            count = await rows_locator.count()
-            for idx in range(count):
-                row = rows_locator.nth(idx)
-                try:
-                    parsed = await self._extract_list_row(row)
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug("guba %s skip row %d: %s", stock_code, idx, exc)
-                    continue
-                if parsed:
-                    results.append(parsed)
-            return results
-        finally:
-            await page.close()
+    async def _fetch_feed_cards(self) -> list[dict[str, Any]]:
+        """Load the homepage in headless Chromium and pull card stubs.
 
-    @staticmethod
-    async def _extract_list_row(row: Any) -> dict[str, Any] | None:
-        """Parse one thread row from the list page.
-
-        guba's list table puts read/comment counts in the first two columns
-        and the title (with href) further along. The exact column index has
-        drifted between layouts so we use inner_text + a link probe.
+        Returns dicts with ``title`` + ``detail_url``. Tests should monkeypatch
+        this method so unit runs never launch a browser.
         """
-        text = (await row.inner_text()).strip()
-        if not text:
-            return None
-        # Cells are tab-separated in the table layout, whitespace in the new
-        # "min-htbk" layout. Normalise to a list of non-empty tokens.
-        cells = [c.strip() for c in re.split(r"[\t\n]+", text) if c.strip()]
-        if len(cells) < 3:
-            return None
+        from playwright.async_api import async_playwright
 
-        # Heuristic: first numeric cell = reads, second numeric cell = comments.
-        numeric_cells = [c for c in cells if re.match(r"^[\d.]+\s*万?$", c)]
-        reads = _parse_count(numeric_cells[0]) if numeric_cells else 0
-        comments = _parse_count(numeric_cells[1]) if len(numeric_cells) > 1 else 0
+        cards: list[dict[str, Any]] = []
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            try:
+                ctx = await browser.new_context()
+                page = await ctx.new_page()
+                await page.goto(self._homepage_url, timeout=self._page_timeout_ms)
+                try:
+                    await page.wait_for_selector(
+                        f"{MAINLIST_SELECTOR} a[href*='/news,']",
+                        timeout=self._mainlist_timeout_ms,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.info(
+                        "guba homepage mainlist did not populate: %s", exc
+                    )
+                    return []
 
-        # Title link
-        link = row.locator("a").first
-        if await link.count() == 0:
-            return None
-        href = (await link.get_attribute("href")) or ""
-        title = ((await link.inner_text()) or "").strip()
-        if not href or not title:
-            return None
-        if href.startswith("/"):
-            detail_url = "https://guba.eastmoney.com" + href
-        elif href.startswith("http"):
-            detail_url = href
-        else:
-            detail_url = "https://guba.eastmoney.com/" + href.lstrip("/")
+                anchors = page.locator(CARD_ANCHOR_SELECTOR)
+                count = await anchors.count()
+                seen_urls: set[str] = set()
+                for idx in range(count):
+                    anchor = anchors.nth(idx)
+                    try:
+                        href = (await anchor.get_attribute("href")) or ""
+                        title = ((await anchor.inner_text()) or "").strip()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("guba skip card %d: %s", idx, exc)
+                        continue
+                    detail_url = self._normalise_detail_url(href)
+                    if not detail_url or not title:
+                        continue
+                    if detail_url in seen_urls:
+                        continue
+                    seen_urls.add(detail_url)
+                    cards.append({"title": title, "detail_url": detail_url})
+            finally:
+                await browser.close()
+        return cards
 
-        # Author tends to be the last non-numeric, non-title cell.
-        author = ""
-        for cell in reversed(cells):
-            if cell and cell != title and not re.match(r"^[\d.]+\s*万?$", cell):
-                # Skip date-like cells (MM-DD HH:MM)
-                if re.match(r"^\d{1,2}-\d{1,2}", cell):
-                    continue
-                author = cell[:60]
+    async def _fetch_detail_html(self, url: str) -> str:
+        """GET a detail page over httpx. SSR per probe — no JS needed."""
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Referer": GUBA_HOMEPAGE_URL,
+        }
+        async with httpx.AsyncClient(
+            timeout=self._detail_http_timeout, follow_redirects=True
+        ) as client:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+            return resp.text
+
+    # ------------------------------------------------------------------
+    # Pure parsing — easy to unit-test
+    # ------------------------------------------------------------------
+
+    def _parse_detail_html(
+        self, html: str, detail_url: str
+    ) -> dict[str, Any] | None:
+        """Extract body text + first inline image + author from a detail page.
+
+        Returns ``None`` if the body is shorter than ``min_content_length`` or
+        if no inline body image is present.
+        """
+        soup = BeautifulSoup(html, "html.parser")
+
+        body_node = None
+        for sel in BODY_SELECTORS:
+            body_node = soup.select_one(sel)
+            if body_node is not None:
                 break
+        if body_node is None:
+            return None
+
+        # Body text: strip HTML, keep visible text only. Chinese chars count
+        # as 1 because Python str length operates on code points.
+        body_text = body_node.get_text(separator="\n", strip=True)
+        if len(body_text) < self._min_content_length:
+            return None
+
+        # Inline image MUST come from inside the body, NOT from page-level
+        # og:image / thumbnail. Prefer the CDN pattern but fall back to any
+        # in-body <img> with an absolute URL.
+        image_url = ""
+        for img in body_node.find_all("img"):
+            src = (img.get("src") or img.get("data-src") or "").strip()
+            if not src:
+                continue
+            if src.startswith("//"):
+                src = "https:" + src
+            if not src.startswith("http"):
+                continue
+            if INLINE_IMAGE_HOST_RE.search(src):
+                image_url = src
+                break
+            if not image_url:
+                # Remember the first absolute image as fallback; keep scanning
+                # for a preferred CDN match.
+                image_url = src
+        if not image_url:
+            return None
+
+        author = self._extract_author(soup)
 
         return {
-            "title": title,
             "author_handle": author or "guba_user",
-            "reads": reads,
-            "comments": comments,
-            "detail_url": detail_url,
+            "content": body_text[:8000],
+            "image_url": image_url,
+            "has_image": True,
+            "posted_at": datetime.now(timezone.utc),
+            "raw_url": detail_url,
+            "likes": 0,
+            "retweets": 0,
+            "replies": 0,
         }
 
-    async def _fetch_detail_page(
-        self, ctx: Any, detail_url: str
-    ) -> dict[str, Any]:
-        """Visit a thread detail page and pull body + first image + timestamp."""
-        page = await ctx.new_page()
-        try:
-            await page.goto(detail_url, timeout=self._detail_timeout_ms)
-            try:
-                await page.wait_for_load_state("domcontentloaded", timeout=3000)
-            except Exception:  # noqa: BLE001
-                pass
+    @staticmethod
+    def _extract_author(soup: BeautifulSoup) -> str:
+        for sel in AUTHOR_SELECTORS:
+            node = soup.select_one(sel)
+            if node is None:
+                continue
+            text = node.get_text(strip=True)
+            if text:
+                return text[:60]
+        return ""
 
-            # Body candidates — newzwcontent is the modern container; legacy
-            # threads use stockcodec or zwconttbn.
-            body = ""
-            for sel in (
-                "#zwconbody",
-                ".newstext",
-                ".article-body",
-                "#zw_body",
-                ".stockcodec",
-            ):
-                loc = page.locator(sel).first
-                if await loc.count() > 0:
-                    body = ((await loc.inner_text()) or "").strip()
-                    if body:
-                        break
-
-            # First in-article image
-            image_url = ""
-            for sel in (
-                "#zwconbody img",
-                ".newstext img",
-                ".article-body img",
-                "#zw_body img",
-                ".stockcodec img",
-            ):
-                img = page.locator(sel).first
-                if await img.count() > 0:
-                    src = (await img.get_attribute("src")) or ""
-                    if src.startswith("//"):
-                        src = "https:" + src
-                    if src.startswith("http"):
-                        image_url = src
-                        break
-
-            # Timestamp — guba renders "2026-05-18 09:30:00" in a .time span
-            posted_at: datetime = datetime.now(timezone.utc)
-            time_loc = page.locator(".time, .pub_time, .zwfbtime").first
-            if await time_loc.count() > 0:
-                ts_text = ((await time_loc.inner_text()) or "").strip()
-                m = re.search(r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(:\d{2})?)", ts_text)
-                if m:
-                    raw = m.group(1)
-                    fmt = "%Y-%m-%d %H:%M:%S" if m.group(2) else "%Y-%m-%d %H:%M"
-                    try:
-                        naive = datetime.strptime(raw, fmt)
-                        posted_at = naive.replace(tzinfo=timezone.utc)
-                    except ValueError:
-                        pass
-
-            return {
-                "content": body[:5000],
-                "image_url": image_url,
-                "has_image": bool(image_url),
-                "posted_at": posted_at,
-                "raw_url": detail_url,
-                "likes": 0,
-                "retweets": 0,
-                "replies": 0,
-            }
-        finally:
-            await page.close()
+    @staticmethod
+    def _normalise_detail_url(href: str) -> str:
+        if not href:
+            return ""
+        if href.startswith("//"):
+            href = "https:" + href
+        if href.startswith("/"):
+            href = GUBA_ORIGIN + href
+        if not href.startswith("http"):
+            return ""
+        # Strip query/fragment for matching, keep canonical form.
+        path = href.split("?")[0].split("#")[0]
+        if not DETAIL_URL_RE.search(path):
+            return ""
+        return path

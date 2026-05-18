@@ -73,7 +73,7 @@ def test_external_adapter_names_includes_x_list_finance() -> None:
     assert "x_list_finance" in EXTERNAL_ADAPTER_NAMES
     assert "x_list_general" not in EXTERNAL_ADAPTER_NAMES
     assert EXTERNAL_ADAPTER_NAMES == frozenset(
-        {"xueqiu", "futu", "news_flash", "x_list_finance", "eastmoney_guba", "benzinga"}
+        {"xueqiu", "futu", "news_flash", "x_list_finance", "eastmoney_guba"}
     )
 
 

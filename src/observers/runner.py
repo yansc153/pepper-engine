@@ -29,7 +29,6 @@ if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
 from observers.base import Observation, SourceAdapter, to_db_row  # noqa: E402
-from observers.benzinga_adapter import BenzingaAdapter  # noqa: E402
 from observers.eastmoney_guba_adapter import EastmoneyGubaAdapter  # noqa: E402
 from observers.futu_adapter import FutuAdapter  # noqa: E402
 from observers.news_flash_adapter import NewsFlashAdapter  # noqa: E402
@@ -40,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 # Adapter names this runner owns (Twitter list adapters belong to S5b).
 EXTERNAL_ADAPTER_NAMES: frozenset[str] = frozenset(
-    {"xueqiu", "futu", "news_flash", "x_list_finance", "eastmoney_guba", "benzinga"}
+    {"xueqiu", "futu", "news_flash", "x_list_finance", "eastmoney_guba"}
 )
 
 # Default lookback if caller doesn't pass an explicit since.
@@ -96,22 +95,12 @@ def _build_x_list_finance(cfg: Mapping[str, Any]) -> SourceAdapter:
 
 
 def _build_eastmoney_guba(cfg: Mapping[str, Any]) -> SourceAdapter:
-    codes = cfg.get("stock_codes") or []
     return EastmoneyGubaAdapter(
-        stock_codes=list(codes),
-        min_reads=int(cfg.get("min_reads") or 10_000),
-        tier_default=int(cfg.get("tier_default", 0)),
-        max_posts_per_fetch=int(cfg.get("max_posts_per_fetch") or 20),
-    )
-
-
-def _build_benzinga(cfg: Mapping[str, Any]) -> SourceAdapter:
-    tickers = cfg.get("tickers") or []
-    return BenzingaAdapter(
-        tickers=list(tickers),
-        tier_default=int(cfg.get("tier_default", 0)),
+        homepage_url=cfg.get("homepage_url") or "https://guba.eastmoney.com/",
+        min_content_length=int(cfg.get("min_content_length") or 3000),
         max_posts_per_fetch=int(cfg.get("max_posts_per_fetch") or 15),
-        min_content_length=int(cfg.get("min_content_length") or 300),
+        detail_concurrency=int(cfg.get("detail_concurrency") or 3),
+        tier_default=int(cfg.get("tier_default", 0)),
     )
 
 
@@ -121,7 +110,6 @@ ADAPTER_BUILDERS: dict[str, AdapterFactory] = {
     "news_flash": _build_news_flash,
     "x_list_finance": _build_x_list_finance,
     "eastmoney_guba": _build_eastmoney_guba,
-    "benzinga": _build_benzinga,
 }
 
 

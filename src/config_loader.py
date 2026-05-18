@@ -62,7 +62,6 @@ AdapterName = Literal[
     "futu",
     "news_flash",
     "eastmoney_guba",
-    "benzinga",
 ]
 
 
@@ -87,17 +86,14 @@ class SourceConfig(BaseModel):
     click_refresh: bool = Field(
         default=False, description="Futu: click '推荐' tab before scrape"
     )
-    stock_codes: list[str] | None = Field(
-        default=None, description="eastmoney_guba: stock forum codes to scrape"
+    homepage_url: str | None = Field(
+        default=None, description="eastmoney_guba: 股吧 homepage URL for 精选 feed"
     )
-    min_reads: int | None = Field(
-        default=None, ge=0, description="eastmoney_guba: minimum thread read count filter"
-    )
-    tickers: list[str] | None = Field(
-        default=None, description="benzinga: US stock tickers to scrape"
+    detail_concurrency: int | None = Field(
+        default=None, gt=0, description="eastmoney_guba: concurrent detail-page fetches"
     )
     min_content_length: int | None = Field(
-        default=None, gt=0, description="benzinga: minimum article body length"
+        default=None, gt=0, description="eastmoney_guba: minimum article body length"
     )
 
     @model_validator(mode="after")
