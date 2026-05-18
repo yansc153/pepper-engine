@@ -161,6 +161,7 @@ async def run_adapters(
     successes = 0
     errors = 0
     inserted = 0
+    per_source: dict[str, tuple[int, int]] = {}  # name -> (fetched, inserted)
     for adapter, outcome in zip(adapters, results):
         observations, ok, err_msg = outcome
         if ok:
@@ -173,19 +174,27 @@ async def run_adapters(
         except sqlite3.Error as exc:
             logger.warning("source_health write failed for %s: %s", adapter.name, exc)
 
+        fetched = len(observations) if observations else 0
+        local_inserted = 0
         if observations:
             try:
-                inserted += _insert_observations(
+                local_inserted = _insert_observations(
                     observations, viral_threshold=viral_threshold, db_path=db_path
                 )
+                inserted += local_inserted
             except sqlite3.Error as exc:
                 logger.error("insert failed for %s: %s", adapter.name, exc)
+        per_source[adapter.name] = (fetched, local_inserted)
 
+    per_source_str = ", ".join(
+        f"{name}=({f}/{i})" for name, (f, i) in per_source.items()
+    )
     logger.info(
-        "runner done: success=%d error=%d inserted=%d",
+        "runner done: success=%d error=%d inserted=%d | per_source(fetched/inserted): %s",
         successes,
         errors,
         inserted,
+        per_source_str,
     )
     return RunReport(successes, errors, inserted)
 

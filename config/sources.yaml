@@ -28,7 +28,7 @@ adapters:
     tier_default: 2
 
   - name: futu
-    enabled: false                       # DOM changed 2026-05; selectors need re-reversing
+    enabled: true                        # re-enabled with broader selectors
     feed_url: "https://q.futunn.com/nnq/recommend"
     cookie_env_key: FUTU_COOKIE_FILE
     rate_limit_per_hour: 12

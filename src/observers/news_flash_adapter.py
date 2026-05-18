@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 EASTMONEY_KUAIXUN_URL = (
     "https://www.cls.cn/nodeapi/updateTelegraphList"
-    "?app=CailianpressWeb&os=web&sv=8.4.6&category=&lastTime="
+    "?app=CailianpressWeb&os=web&sv=8.4.6&category=red&lastTime="
 )
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
@@ -140,6 +140,24 @@ class NewsFlashAdapter:
         content = (f"{title}\n{body}".strip() if title else body)
         if not content:
             raise ObservationValidationError("empty news flash content")
+
+        # Finance-only filter: keep items that either reference a stock OR
+        # mention finance keywords in title/body. Drops geopolitics/military
+        # noise even if cls.cn category=red leaks them through.
+        stock_list = raw.get("stock_list") or []
+        subjects = raw.get("subjects") or []
+        subject_names = " ".join(s.get("subject_name", "") for s in subjects)
+        haystack = f"{content} {subject_names}"
+        FINANCE_KEYWORDS = (
+            "股", "市", "A股", "美股", "港股", "债", "基金", "央行", "利率",
+            "通胀", "降息", "加息", "汇率", "美元", "人民币", "财报", "营收",
+            "净利", "并购", "IPO", "上市", "市值", "板块", "牛市", "熊市",
+            "证监会", "银保监", "美联储", "经济", "GDP", "PMI", "CPI",
+            "原油", "黄金", "白银", "铜", "锂", "新能源", "芯片", "半导体",
+            "AI", "人工智能", "云计算", "互联网", "地产", "楼市", "信贷",
+        )
+        if not stock_list and not any(kw in haystack for kw in FINANCE_KEYWORDS):
+            raise ObservationValidationError("non-finance: no stock_list and no finance keyword")
 
         url = (
             raw.get("shareurl")

@@ -48,7 +48,9 @@ async def test_fetch_latest_parses_payload(fixture_payload, monkeypatch) -> None
 
     monkeypatch.setattr(NewsFlashAdapter, "_fetch_payload", _fake)
     obs_list = await adapter.fetch_latest(datetime(2020, 1, 1, tzinfo=timezone.utc))
-    assert len(obs_list) == 5
+    # finance-only filter drops the "国常会稳就业" fixture item (no stock_list,
+    # no finance keyword hit) — 4 finance items pass through.
+    assert len(obs_list) == 4
     assert all(o.source == "news_flash" for o in obs_list)
     assert all(o.author_tier == 0 for o in obs_list)
     assert all(o.author_handle == "eastmoney_kuaixun" for o in obs_list)

@@ -120,11 +120,35 @@ class FutuAdapter:
                     logger.debug("futu 推荐 click failed (continuing): %s", exc)
                 await page.wait_for_load_state("networkidle")
 
-                cards = page.locator("[data-feed-id], article, .feed-item")
-                raw_count = await cards.count()
+                # Try a sequence of selectors — futu DOM changes often, so we
+                # cast a wider net and pick the first selector that matches.
+                CANDIDATE_SELECTORS = (
+                    "[data-feed-id]",
+                    "article",
+                    ".feed-item",
+                    ".feed-card",
+                    "[class*='feed-card']",
+                    "[class*='post-card']",
+                    "[class*='nnq-item']",
+                    ".list-item",
+                    "[class*='news-item']",
+                )
+                cards = None
+                raw_count = 0
+                used_selector = "none"
+                for sel in CANDIDATE_SELECTORS:
+                    locator = page.locator(sel)
+                    n = await locator.count()
+                    if n > 0:
+                        cards = locator
+                        raw_count = n
+                        used_selector = sel
+                        break
+                if cards is None:
+                    cards = page.locator("article")  # placeholder so loop below no-ops
                 logger.info(
-                    "futu page loaded, selector match=%d, page_title=%s",
-                    raw_count, await page.title(),
+                    "futu page loaded, selector=%s match=%d, page_title=%s",
+                    used_selector, raw_count, await page.title(),
                 )
                 count = min(raw_count, self._max_posts)
                 for idx in range(count):
