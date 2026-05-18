@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -61,11 +62,29 @@ _TEMPLATE_FILES = {
 }
 
 _LENGTH_BANDS = {
-    "short": "≤ 280 字",
-    "medium": "281-1000 字",
-    "long": "1001-2500 字",
-    "article": "> 2500 字（X Article）",
+    "short":   "≤ 280 字（X 短推）",
+    "medium":  "500-1000 字（X 长推文）",
+    "long":    "1000-1500 字（X Article 短版）",
+    "article": "1500-2000 字（X Article 完整版）",
 }
+
+
+def _length_band_for_source(content_length: int) -> str:
+    """Map source article length → target rewrite length tier.
+
+    Per user spec 2026-05-18:
+      source >3000 → article (1500-2000 字)
+      source 2000-3000 → long (1000-1500 字)
+      source 1500-2000 → medium (500-1000 字)
+      source <1500 → short (≤ 280 字)
+    """
+    if content_length > 3000:
+        return "article"
+    if content_length > 2000:
+        return "long"
+    if content_length > 1500:
+        return "medium"
+    return "short"
 
 _AUDIT_PROMPT = """你是中文社交文案审稿人。
 
@@ -206,6 +225,37 @@ def _source_obs_ids(topic: dict[str, Any]) -> list[int]:
 # Pipeline steps
 # ────────────────────────────────────────────────────────────
 
+def _load_source_bodies(topic: dict[str, Any]) -> tuple[str, int]:
+    """Pull the actual source observation bodies + max content length.
+
+    The writer needs raw source material to rewrite WITHOUT fabrication;
+    the topic_summary alone is too compressed to anchor a 1500+ char rewrite.
+    Returns (joined_bodies, max_single_body_length).
+    """
+    obs_ids = _source_obs_ids(topic)
+    if not obs_ids:
+        return "", 0
+    from src.database import get_conn
+    conn = get_conn()
+    try:
+        placeholders = ",".join(["?"] * len(obs_ids))
+        rows = conn.execute(
+            f"SELECT content, content_length FROM reaction_observations "
+            f"WHERE id IN ({placeholders}) ORDER BY content_length DESC",
+            obs_ids,
+        ).fetchall()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("source body lookup failed: %s", exc)
+        return "", 0
+    finally:
+        conn.close()
+    if not rows:
+        return "", 0
+    max_len = max(int(r["content_length"] or len(r["content"] or "")) for r in rows)
+    bodies = "\n\n---\n\n".join(str(r["content"] or "")[:4000] for r in rows[:3])
+    return bodies, max_len
+
+
 def build_fact_spine(topic_candidate: dict[str, Any]) -> dict[str, Any]:
     """Turn a topic_candidate row into a hard-fact skeleton.
 
@@ -213,11 +263,14 @@ def build_fact_spine(topic_candidate: dict[str, Any]) -> dict[str, Any]:
     """
     summary = (topic_candidate.get("topic_summary") or "").strip()
     facts = [line.strip() for line in summary.split("\n") if line.strip()][:6]
+    source_bodies, max_source_len = _load_source_bodies(topic_candidate)
     return {
         "fact_spine": facts,
         "most_telling_fact": facts[0] if facts else "",
         "topic_lane": topic_candidate.get("predicted_topic_lane", ""),
         "virality_score": topic_candidate.get("virality_score", 0.0),
+        "source_bodies": source_bodies,
+        "max_source_length": max_source_len,
     }
 
 
@@ -266,6 +319,8 @@ def build_angle_card(
         "pattern_ids": pattern_ids,
         "most_telling_fact": fact_spine.get("most_telling_fact", ""),
         "fact_spine": fact_spine.get("fact_spine", []),
+        "source_bodies": fact_spine.get("source_bodies", ""),
+        "max_source_length": fact_spine.get("max_source_length", 0),
     }
 
 
@@ -279,12 +334,34 @@ def _build_writer_prompt(
     template = _resolve_template(content_mode)
     voice_profile = _read_text(_VOICE_DIR / "voice_profile.md", max_chars=2000)
     voice_rules = _read_text(_VOICE_DIR / "voice_rules.md", max_chars=1500)
+
+    # OVERRIDE optimal_length based on source body length (user spec 2026-05-18).
+    # Topic-scorer's LLM prediction is unreliable; deterministic mapping wins.
+    src_len = int(angle_card.get("max_source_length") or 0)
+    if src_len > 0:
+        optimal_length = _length_band_for_source(src_len)
     length_hint = _LENGTH_BANDS.get(optimal_length, _LENGTH_BANDS["short"])
+
     hooks_block = "\n".join(f"- {h}" for h in angle_card["hooks"]) or "（无）"
     examples_block = "\n".join(f"- {e}" for e in angle_card["examples"]) or "（无）"
     facts_block = "\n".join(f"- {f}" for f in angle_card["fact_spine"]) or "（无）"
+    source_bodies = (angle_card.get("source_bodies") or "").strip()
+    source_block = source_bodies[:8000] if source_bodies else "（无源文，禁止编造任何具体数据/事件）"
 
     return f"""你是中文金融账号写手 persona={persona} lane={topic_lane}。
+
+## ⚠️ 最高优先级硬规则（违反 = 自动重写，扣分）
+
+1. **禁止编造**：所有数字、公司名、人名、股票代码、时间、政策内容必须来自下面"原文"部分。原文没有的绝对不能写。
+2. **禁止任何"我"的具体交易动作**：
+   - ❌ 不能写：「我上周加了仓」「我模拟盘加到两成」「我真仓只敢给 5%」「我减持」「我止盈」「我建仓」「我账户里」「我手指悬在卖出键上」「我没按下去」「我浮盈垫高 5 个点」「我直接降回半仓」「我数了数」「我先看 X 谁先破位」
+   - ✅ 可以写：「市场怎么看」「数据告诉我们」「短期判断」「关键观察位是 X」「这个信号意味着 Y」「机构资金流向显示 Z」
+   - 角色定位：你是市场观察者 / 复盘者 / 分析师，不是交易者。可以分析事件、判断方向、给观察位，**绝对不能编造自己做过的具体交易**。
+3. **禁止臆造生活比喻**：比如「夜班食堂的炒饭」「油一冷就坨」这种和原文无关的具体生活意象，不能凭空加。比喻只能用原文里出现过的。
+4. **目标字数是硬要求**：少于下限或多于上限都算不合格 → 必须按目标长度写完。
+
+## 原文（仿写源 — 你的所有事实/数字/事件都必须来自这里）
+{source_block}
 
 ## 模板（{content_mode}）
 {template}
@@ -295,7 +372,7 @@ def _build_writer_prompt(
 ## 排版规则
 {voice_rules}
 
-## 事实骨架
+## 事实骨架（从原文蒸馏出的关键点）
 {facts_block}
 
 ## 学到的钩子（参考结构，不抄原句）
@@ -305,7 +382,16 @@ def _build_writer_prompt(
 {examples_block}
 
 ## 目标长度
-{length_hint}（按此长度写，不要硬截断）
+{length_hint}
+
+按目标长度认真写，不要硬截断。**字数要求是硬要求**：少于下限或多于上限都算不合格。
+
+## ⚠️ 写之前再次检查
+
+- 你写的每个数字/公司名/事件都能在"原文"里找到吗？找不到的删掉。
+- 你的句子里有出现「我加仓 / 我减仓 / 我买入 / 我卖出 / 我止盈 / 我止损 / 我账户 / 我仓位 / 我模拟盘 / 我真仓 / 我点了卖出 / 我数了 / 我手指 / 我没按 / 我浮盈 / 我打算」吗？有 → 全部删掉，改成第三人称分析口吻。
+- 字数到位了吗（{length_hint}）？没到 → 接着写。
+- 第一人称「我」最多出现 0-1 次，且只能用于「我观察到 / 我判断 / 我倾向」这类纯分析语言，不能涉及具体交易动作。
 
 ## 输出 JSON
 {{
@@ -338,8 +424,44 @@ def _coerce_stance(value: object) -> int:
     return max(1, min(5, n))
 
 
+# Regex catching first-person trade fabrication. LLM keeps inventing personal
+# trades despite hard prompt rules, so we scan the output and force rewrite.
+_FAB_TRADE_RE = re.compile(
+    r"我[^\n。，,.\s]{0,8}("
+    r"加仓|减仓|建仓|清仓|割肉|止盈|止损|"
+    r"买入|卖出|减持|加|减|清|割|止|"
+    r"模拟盘|真仓|账户|仓位|浮盈|浮亏|持仓|"
+    r"按.?[卖买]|手指悬|没按|点了|敲了|挂了|"
+    r"数了|盯了|看了几眼|刷了几次|"
+    r"先看|要不要|打算|准备"
+    r")"
+)
+
+
+def detect_fabricated_trades(content: str) -> list[str]:
+    """Return list of first-person trade phrases found (empty = clean)."""
+    return [m.group(0) for m in _FAB_TRADE_RE.finditer(content)]
+
+
 def audit_for_template(content: str) -> dict[str, Any]:
-    """A-class anti-template audit. Returns verdict dict; on LLM error, pass."""
+    """A-class audit: regex pass (fast, deterministic) + LLM pass (slow, nuanced).
+
+    Regex catches the persistent first-person trade fabrication that the LLM
+    keeps producing despite prompt rules. LLM catches everything else.
+    """
+    fab = detect_fabricated_trades(content)
+    if fab:
+        return {
+            "verdict": "needs_rewrite",
+            "why_it_reads_ai": [
+                f"编造了第一人称交易动作：{', '.join(fab[:5])}"
+            ],
+            "rewrite_focus": (
+                "删除所有「我加仓/减仓/建仓/止盈/止损/账户/仓位/模拟盘/真仓」"
+                "等任何具体交易动作的语言，改成第三人称分析口吻。"
+            ),
+        }
+
     try:
         raw = call_llm(_AUDIT_PROMPT + content, response_format="json", max_retries=1)
         parsed = json.loads(raw)
@@ -502,6 +624,30 @@ def _finalize(
     report: GuardrailReport,
 ) -> DraftResult:
     """Score, persist if pass, and build the DraftResult."""
+    # Last-line fab gate: if the rewrite loop couldn't shake the first-person
+    # trade fabrication, DROP the draft. Better to ship 0 than ship a lie.
+    fab_hits = detect_fabricated_trades(draft["content"])
+    if fab_hits:
+        logger.warning(
+            "DROPPING draft for topic %s — fab phrases survived rewrite loop: %s",
+            topic.get("id"), fab_hits,
+        )
+        return DraftResult(
+            success=False,
+            draft_id=None,
+            content=draft["content"],
+            content_length=len(draft["content"]),
+            content_mode=topic["predicted_content_mode"],
+            optimal_length=topic["predicted_length"],
+            topic_lane=topic["predicted_topic_lane"],
+            persona=topic["persona"],
+            pattern_ids=pattern_ids,
+            image_path=None,
+            score_total=None,
+            error=f"fabrication survived rewrite: {fab_hits[:3]}",
+            score_breakdown=None,
+        )
+
     score_result: ScoreResult = scorer_score(draft["content"], guardrail_report=report)
 
     if not score_result.passed:
@@ -521,28 +667,46 @@ def _finalize(
             score_breakdown=score_result.to_dict(),
         )
 
+    # HARD IMAGE REQUIREMENT (user spec 2026-05-18): drop draft if no source
+    # observation has an image — Twitter engagement drops sharply for text-only
+    # posts, and user said "没有配图一律不看".
+    src_image_url = _pick_source_image_url(topic)
+    if not src_image_url:
+        logger.info("topic %s has no source image — dropping draft", topic.get("id"))
+        return DraftResult(
+            success=False,
+            draft_id=None,
+            content=draft["content"],
+            content_length=len(draft["content"]),
+            content_mode=topic["predicted_content_mode"],
+            optimal_length=topic["predicted_length"],
+            topic_lane=topic["predicted_topic_lane"],
+            persona=topic["persona"],
+            pattern_ids=pattern_ids,
+            image_path=None,
+            score_total=score_result.total,
+            error="no source image available",
+            score_breakdown=score_result.to_dict(),
+        )
+
     # Persist first to get draft_id, then download image (need id for filename).
     try:
         draft_id = _persist_draft(draft["content"], topic, pattern_ids, image_path=None)
     except Exception as exc:  # noqa: BLE001 — persistence failure surfaces as error
         return _fail_result(topic, f"persist failed: {exc}", content=draft["content"])
 
-    # Image flow: pull source image_url from cluster, download, update draft row.
-    image_path: str | None = None
-    src_image_url = _pick_source_image_url(topic)
-    if src_image_url:
-        image_path = _download_source_image(src_image_url, draft_id)
-        if image_path:
-            from src.database import get_conn
-            conn = get_conn()
-            try:
-                with conn:
-                    conn.execute(
-                        "UPDATE drafts SET image_path = ? WHERE id = ?",
-                        (image_path, draft_id),
-                    )
-            finally:
-                conn.close()
+    image_path: str | None = _download_source_image(src_image_url, draft_id)
+    if image_path:
+        from src.database import get_conn
+        conn = get_conn()
+        try:
+            with conn:
+                conn.execute(
+                    "UPDATE drafts SET image_path = ? WHERE id = ?",
+                    (image_path, draft_id),
+                )
+        finally:
+            conn.close()
 
     return DraftResult(
         success=True,

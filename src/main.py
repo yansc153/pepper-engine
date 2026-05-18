@@ -126,6 +126,65 @@ async def _cmd_post() -> CommandResult:
     }
 
 
+async def _cmd_batch_post() -> CommandResult:
+    """Generate up to BATCH_N drafts in one shot — used by the morning cron.
+
+    For each iteration: pick top fresh topic → write_draft → push_draft_to_discord.
+    Continues until BATCH_N pushed OR no fresh topics left OR all rejected.
+    """
+    from src.database import get_conn
+    from src.discord.bot import push_draft_to_discord
+    from src.writer import write_draft
+    from selector import pick_top_topic
+
+    BATCH_N = int(os.environ.get("BATCH_POST_N", "20"))
+    pushed: list[dict[str, Any]] = []
+    rejected = 0
+    no_image = 0
+    skipped_no_topic = 0
+    write_errors = 0
+
+    for i in range(BATCH_N):
+        conn = get_conn()
+        try:
+            topic = pick_top_topic(conn)
+        finally:
+            conn.close()
+        if topic is None:
+            skipped_no_topic += 1
+            break
+
+        try:
+            draft = await write_draft(topic)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.exception("batch write_draft #%d failed: %s", i, exc)
+            write_errors += 1
+            continue
+
+        if not draft.success or draft.draft_id is None:
+            if draft.error and "no source image" in draft.error:
+                no_image += 1
+            else:
+                rejected += 1
+            continue
+
+        try:
+            msg_id = await push_draft_to_discord(draft.draft_id)
+            pushed.append({"draft_id": draft.draft_id, "msg_id": msg_id})
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.exception("batch push #%d failed: %s", i, exc)
+
+    return 0, {
+        "batch_target": BATCH_N,
+        "pushed_count": len(pushed),
+        "rejected": rejected,
+        "no_image": no_image,
+        "write_errors": write_errors,
+        "stopped_no_topic": skipped_no_topic > 0,
+        "pushed": pushed,
+    }
+
+
 async def _cmd_discord_poll() -> CommandResult:
     """Sweep Discord reactions on outstanding drafts."""
     from src.discord.bot import poll_reactions
@@ -243,6 +302,7 @@ async def _cmd_test() -> CommandResult:
 COMMANDS: dict[str, CommandFn] = {
     "observe": _cmd_observe,
     "post": _cmd_post,
+    "batch_post": _cmd_batch_post,
     "discord_poll": _cmd_discord_poll,
     "self_monitor": _cmd_self_monitor,
     "mine": _cmd_mine,

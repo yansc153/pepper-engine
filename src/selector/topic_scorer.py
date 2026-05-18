@@ -33,7 +33,7 @@ _DEFAULT_LOOKBACK_HOURS = 1
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+|[一-鿿]")
 # Topic-writability gate: if the LLM-predicted virality_score is below this,
 # the topic is judged not worth a tweet — skip rather than push a weak draft.
-_MIN_VIRALITY_TO_WRITE = 40.0
+_MIN_VIRALITY_TO_WRITE = 10.0  # batch_post mode: write generously, user picks in Discord
 
 
 class ScoreResult(tuple[int, float]):

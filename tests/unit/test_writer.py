@@ -99,6 +99,27 @@ def fake_db(monkeypatch: pytest.MonkeyPatch):
         return 9001 + len(inserted)
 
     monkeypatch.setattr(writer_mod, "_persist_draft", fake_persist)
+
+    # Writer now hard-requires a source image. Tests don't seed observations,
+    # so patch the image hooks to pretend we found + downloaded one.
+    monkeypatch.setattr(
+        writer_mod,
+        "_pick_source_image_url",
+        lambda topic: "https://test.invalid/fake.jpg",
+    )
+    monkeypatch.setattr(
+        writer_mod,
+        "_download_source_image",
+        lambda url, draft_id: f"/tmp/fake_draft_{draft_id}.jpg",
+    )
+    # Also block the post-persist UPDATE drafts query which would hit a real DB.
+    import sqlite3
+    class _StubConn:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, *a, **k): return self
+        def close(self): pass
+    monkeypatch.setattr("src.database.get_conn", lambda *a, **k: _StubConn())
     return inserted
 
 

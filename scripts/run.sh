@@ -14,7 +14,7 @@ if [ -z "${CMD}" ]; then
 fi
 
 case "${CMD}" in
-    observe|post|mine|review|remine|discord_poll|self_monitor) ;;
+    observe|post|batch_post|mine|review|remine|discord_poll|self_monitor) ;;
     *)
         echo "run.sh: unknown command '${CMD}'" >&2
         exit 2
