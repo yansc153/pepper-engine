@@ -1,11 +1,13 @@
-"""Xueqiu hot-feed adapter.
+"""Xueqiu 达人 (talents) tab adapter — Playwright-based.
 
-Pulls the public hot timeline JSON via HTTP using cookies from
-``secrets/xueqiu_cookies.json`` (Playwright-format list). Returns
-``Observation`` instances ready for INSERT into ``reaction_observations``.
+Architecture note (2026-05-18 final): xueqiu's public_timeline_by_category
+HTTP API returns topic-card streams only, never real user statuses. The 达人
+section at https://xueqiu.com/today is the canonical "expert user posts" feed
+but it's JS-rendered and requires clicking the 达人 tab to refresh — so we
+drive it via Playwright (same pattern as futu).
 
-Failures are swallowed and surfaced through ``source_health``. Designed to be
-mocked with ``respx`` in tests.
+Each post in 达人 is a long-form column with body + image + author handle +
+fav/retweet/reply counts — exactly the "rewritable original" the writer needs.
 """
 
 from __future__ import annotations
@@ -19,8 +21,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import httpx
-
 from observers.base import (
     Observation,
     ObservationValidationError,
@@ -29,61 +29,21 @@ from observers.base import (
 
 logger = logging.getLogger(__name__)
 
-XUEQIU_FEED_URL = (
-    # Step 1: headline list. Each item carries only a topic-card stub with a
-    # `target` link pointing to the actual article. Step 2 below hydrates each
-    # via show.json to pull the real body+image.
-    "https://xueqiu.com/v4/statuses/public_timeline_by_category.json"
-    "?since_id=-1&max_id=-1&count=20&category=-1&type=11"
-)
-XUEQIU_SHOW_URL = "https://xueqiu.com/v4/statuses/show.json"
-
-# Filter threshold: skip xueqiu items shorter than this — we only want long-form
-# columns/articles as rewritable source material, not short status updates.
-MIN_CONTENT_LENGTH = 250  # ~250 Chinese chars ≈ 750 bytes; enough for "column-grade" posts
-
-# Two-stage fetch tuning
-HYDRATION_CONCURRENCY = 5      # concurrent show.json calls
-HYDRATION_TIMEOUT = 10.0       # per-call timeout (sec)
-_TARGET_ID_RE = re.compile(r"/(\d+)/?$")  # extract trailing status_id from target
-_HTML_TAG_RE = re.compile(r"<[^>]+>")     # strip HTML tags from show.json body
-_HTML_IMG_RE = re.compile(r'<img[^>]+src="([^"]+)"', re.I)
 XUEQIU_HOME_URL = "https://xueqiu.com/"
+XUEQIU_TALENTS_URL = "https://xueqiu.com/today"  # 达人 tab lives here
+XUEQIU_FEED_URL = XUEQIU_TALENTS_URL  # alias kept for runner backward-compat
 DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/126.0 Safari/537.36"
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
-
-def _unwrap_status(raw: dict[str, Any]) -> dict[str, Any]:
-    """Return the real status object from a public_timeline_by_category wrapper.
-
-    Priority:
-      1. `original_status` — the canonical un-reposted status (preferred)
-      2. `data` (dict or JSON-string) — fallback; usually a topic-card shape
-      3. raw — already unwrapped
-    """
-    if not isinstance(raw, dict):
-        return {}
-    if isinstance(raw.get("original_status"), dict) and raw["original_status"]:
-        return raw["original_status"]
-    data = raw.get("data")
-    if isinstance(data, str) and data.strip().startswith("{"):
-        try:
-            return json.loads(data)
-        except json.JSONDecodeError:
-            pass
-    if isinstance(data, dict) and data:
-        return data
-    return raw
+MIN_CONTENT_LENGTH = 250  # ~250 Chinese chars; column-grade only
+PAGE_TIMEOUT_MS = 25000
+SCROLL_PASSES = 3  # scroll a few times to load more posts via infinite scroll
 
 
 class XueqiuAdapter:
-    """Adapter for Xueqiu's hot-topic feed.
-
-    Implements ``observers.base.SourceAdapter``.
-    """
+    """Playwright-based xueqiu 达人 tab adapter."""
 
     name = "xueqiu"
     cookie_env_key = "XUEQIU_COOKIE_FILE"
@@ -91,222 +51,179 @@ class XueqiuAdapter:
 
     def __init__(
         self,
-        feed_url: str = XUEQIU_FEED_URL,
-        tier_default: int = 0,  # tier=0: contributes topic candidates only, NOT learned
-        max_posts_per_fetch: int = 30,
-        request_timeout: float = 15.0,
+        feed_url: str = XUEQIU_TALENTS_URL,
+        tier_default: int = 0,  # tier=0: topic source only, NOT learned
+        max_posts_per_fetch: int = 20,
+        page_timeout_ms: int = PAGE_TIMEOUT_MS,
     ) -> None:
         self._feed_url = feed_url
         self._tier_default = tier_default
         self._max_posts = max_posts_per_fetch
-        self._timeout = request_timeout
-
-    # ------------------------------------------------------------------
-    # SourceAdapter surface
-    # ------------------------------------------------------------------
+        self._page_timeout_ms = page_timeout_ms
 
     async def fetch_latest(self, since: datetime) -> list[Observation]:
         if since.tzinfo is None:
             since = since.replace(tzinfo=timezone.utc)
         try:
-            payload = await self._fetch_payload()
-        except Exception as exc:  # noqa: BLE001 — adapter must not raise
+            raw_posts = await self._fetch_via_browser()
+        except Exception as exc:  # noqa: BLE001
             logger.warning("xueqiu fetch failed: %s", exc)
             return []
-        items = payload.get("list") or payload.get("statuses") or []
-        if items:
-            first = items[0]
-            # public_timeline_by_category wraps the real status; unwrap it
-            unwrapped = _unwrap_status(first)
-            logger.info(
-                "xueqiu item wrapped_keys=%s | unwrapped_keys=%s user=%s text_snip=%s",
-                list(first.keys()),
-                list(unwrapped.keys())[:15] if unwrapped else [],
-                (unwrapped.get("user", {}).get("screen_name") if unwrapped else None),
-                str(unwrapped.get("text", unwrapped.get("description", "")))[:80] if unwrapped else "",
-            )
-        return self._parse_payload(payload, since)
+        return self._parse_posts(raw_posts, since)
 
     async def health_check(self) -> bool:
-        try:
-            cookies = self._load_cookies()
-        except FileNotFoundError:
-            return False
-        try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.get(
-                    XUEQIU_HOME_URL,
-                    cookies=cookies,
-                    headers=self._headers(),
-                )
-            return resp.status_code == 200
-        except httpx.HTTPError:
-            return False
+        return self._cookie_file().exists()
 
-    # ------------------------------------------------------------------
-    # internals
     # ------------------------------------------------------------------
 
     def _cookie_file(self) -> Path:
         path = os.environ.get(self.cookie_env_key, "")
         if not path:
-            raise FileNotFoundError(f"env {self.cookie_env_key} is unset")
+            return Path("/app/secrets/xueqiu_cookies.json")
         return Path(path)
 
-    def _load_cookies(self) -> dict[str, str]:
+    def _load_cookies(self) -> list[dict[str, Any]]:
         path = self._cookie_file()
         if not path.exists():
-            raise FileNotFoundError(f"cookie file missing: {path}")
+            raise FileNotFoundError(f"xueqiu cookie file missing: {path}")
         raw = json.loads(path.read_text(encoding="utf-8"))
-        return {c["name"]: c["value"] for c in raw if "name" in c and "value" in c}
+        # Playwright wants a list of cookie dicts with domain/path
+        return raw if isinstance(raw, list) else []
 
-    def _headers(self) -> dict[str, str]:
+    async def _fetch_via_browser(self) -> list[dict[str, Any]]:
+        """Drive headless Chromium: open 达人 page, click refresh, scrape cards.
+
+        Returns a list of raw dicts compatible with from_scrape_dict.
+        """
+        from playwright.async_api import async_playwright
+
+        results: list[dict[str, Any]] = []
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=True)
+            try:
+                ctx = await browser.new_context(user_agent=DEFAULT_USER_AGENT)
+                try:
+                    ctx.add_cookies(await asyncio.to_thread(self._load_cookies))
+                except (FileNotFoundError, TypeError) as exc:
+                    logger.warning("xueqiu cookies not loaded: %s", exc)
+
+                page = await ctx.new_page()
+                await page.goto(self._feed_url, timeout=self._page_timeout_ms)
+
+                # Click "达人" tab to force-refresh the feed (user direction)
+                for sel in ("text=达人", '[role="tab"]:has-text("达人")',
+                            'a:has-text("达人")'):
+                    try:
+                        await page.click(sel, timeout=3000)
+                        break
+                    except Exception:  # noqa: BLE001
+                        continue
+                else:
+                    logger.debug("xueqiu 达人 tab not found, scraping current view")
+
+                await page.wait_for_load_state("networkidle", timeout=8000)
+
+                # Scroll to trigger lazy-load
+                for _ in range(SCROLL_PASSES):
+                    await page.evaluate("window.scrollBy(0, window.innerHeight * 2)")
+                    await page.wait_for_timeout(800)
+
+                # Try several known card selectors — xueqiu uses .AnonymousHome__list__item
+                # and .timeline__item across different layouts; cast a wide net.
+                CARDS_SELECTORS = (
+                    ".AnonymousHome__list__item",
+                    ".timeline__item",
+                    "article",
+                    "[class*='timeline'] [class*='item']",
+                    "[class*='status-card']",
+                )
+                cards = None
+                used = "none"
+                count = 0
+                for sel in CARDS_SELECTORS:
+                    locator = page.locator(sel)
+                    n = await locator.count()
+                    if n > 0:
+                        cards = locator
+                        used = sel
+                        count = n
+                        break
+
+                logger.info(
+                    "xueqiu page loaded, selector=%s match=%d, title=%s",
+                    used, count, await page.title(),
+                )
+
+                if cards is None:
+                    return results
+
+                for i in range(min(count, self._max_posts)):
+                    try:
+                        card = cards.nth(i)
+                        results.append(await self._extract_card(card, page.url))
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("xueqiu skip card %d: %s", i, exc)
+            finally:
+                await browser.close()
+        return results
+
+    @staticmethod
+    async def _extract_card(card: Any, page_url: str) -> dict[str, Any]:
+        text = (await card.inner_text()).strip()
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        if len(lines) < 2:
+            raise ValueError("card has too few lines")
+        handle = lines[0][:60]
+        body = "\n".join(lines[1:])[:5000]
+
+        # link to the post — first <a> with href
+        href = ""
+        link = card.locator("a").first
+        if await link.count() > 0:
+            href = await link.get_attribute("href") or ""
+        if href and not href.startswith("http"):
+            href = "https://xueqiu.com" + href
+
+        # cover image — first <img> inside the card
+        image_url = ""
+        img = card.locator("img").first
+        if await img.count() > 0:
+            src = await img.get_attribute("src") or ""
+            if src.startswith("http"):
+                image_url = src
+
         return {
-            "User-Agent": DEFAULT_USER_AGENT,
-            "Referer": XUEQIU_HOME_URL,
-            "Accept": "application/json",
+            "author_handle": handle,
+            "content": body,
+            "posted_at": datetime.now(timezone.utc),  # 达人 page hides exact time
+            "likes": 0,
+            "retweets": 0,
+            "replies": 0,
+            "has_image": bool(image_url),
+            "raw_url": href or page_url,
+            "image_url": image_url,
         }
 
-    async def _fetch_payload(self) -> dict[str, Any]:
-        """Two-stage fetch: headlines list → hydrate each via show.json.
-
-        The headline endpoint returns topic-card stubs (title+target+pic
-        only — no body, no real user). show.json returns the full status
-        object with text body, image, author, engagement counters. We
-        parallelize the hydration calls under a semaphore.
-        """
-        cookies = self._load_cookies()
-        async with httpx.AsyncClient(
-            timeout=self._timeout, cookies=cookies, headers=self._headers()
-        ) as client:
-            # Stage 1: headline list
-            resp = await client.get(self._feed_url)
-            resp.raise_for_status()
-            headlines = resp.json()
-            items = headlines.get("list") or headlines.get("statuses") or []
-
-            # Extract status_ids from each item's target ("/user_id/status_id")
-            status_ids: list[int] = []
-            for item in items[: self._max_posts]:
-                unwrapped = _unwrap_status(item)
-                target = unwrapped.get("target") or item.get("target") or ""
-                m = _TARGET_ID_RE.search(target)
-                if m:
-                    status_ids.append(int(m.group(1)))
-
-            if not status_ids:
-                logger.info("xueqiu headlines returned 0 valid targets")
-                return {"list": []}
-
-            # Stage 2: hydrate each via show.json (concurrent, bounded)
-            sem = asyncio.Semaphore(HYDRATION_CONCURRENCY)
-
-            async def _fetch_one(sid: int) -> dict[str, Any] | None:
-                async with sem:
-                    try:
-                        r = await client.get(
-                            XUEQIU_SHOW_URL,
-                            params={"id": sid},
-                            timeout=HYDRATION_TIMEOUT,
-                        )
-                        r.raise_for_status()
-                        return r.json()
-                    except Exception as exc:  # noqa: BLE001
-                        logger.debug("xueqiu show id=%s failed: %s", sid, exc)
-                        return None
-
-            results = await asyncio.gather(*[_fetch_one(s) for s in status_ids])
-            articles = [a for a in results if a]
-            logger.info(
-                "xueqiu hydrated %d/%d articles from headlines",
-                len(articles), len(status_ids),
-            )
-            return {"list": articles}
-
-    def _parse_payload(
-        self, payload: dict[str, Any], since: datetime
+    def _parse_posts(
+        self, raw_posts: list[dict[str, Any]], since: datetime
     ) -> list[Observation]:
-        items = payload.get("list") or payload.get("statuses") or []
         out: list[Observation] = []
-        for raw in items[: self._max_posts]:
-            unwrapped = _unwrap_status(raw)
+        for raw in raw_posts[: self._max_posts]:
+            if not raw.get("image_url"):
+                logger.debug("xueqiu skip text-only card")
+                continue
+            content = (raw.get("content") or "").strip()
+            if len(content) < MIN_CONTENT_LENGTH:
+                logger.debug("xueqiu skip short card (%d chars)", len(content))
+                continue
             try:
-                obs = self._row_to_observation(unwrapped)
+                obs = from_scrape_dict(
+                    raw, source=self.name, tier=self._tier_default  # type: ignore[arg-type]
+                )
             except ObservationValidationError as exc:
-                logger.debug("xueqiu skip row: %s", exc)
+                logger.debug("xueqiu skip card: %s", exc)
                 continue
             if obs.posted_at <= since:
                 continue
             out.append(obs)
         return out
-
-    def _row_to_observation(self, raw: dict[str, Any]) -> Observation:
-        user = raw.get("user") or {}
-        # public_timeline_by_category headline items don't carry user;
-        # fall back to "xueqiu_topic" as the handle so we still capture them.
-        handle = (user.get("screen_name") or "").strip() or "xueqiu_topic"
-
-        target = raw.get("target") or ""
-        if not target:
-            raise ObservationValidationError("missing target url")
-        url = target if target.startswith("http") else f"https://xueqiu.com{target}"
-        pic = raw.get("pic_sizes") or raw.get("pic") or raw.get("first_pic") or ""
-        has_image = bool(pic) and pic != ""
-
-        # Content from show.json comes as HTML (`<p>...</p><img...><p>...`).
-        # Strip tags for the body we store; extract first <img src=...> for image.
-        raw_text = (
-            raw.get("text")
-            or raw.get("description")
-            or raw.get("title")
-            or raw.get("topic_desc")
-            or raw.get("topic_title")
-            or ""
-        )
-        # Pull first image from inline HTML BEFORE stripping tags
-        inline_img_match = _HTML_IMG_RE.search(raw_text) if raw_text else None
-        inline_img = inline_img_match.group(1) if inline_img_match else ""
-        content = _HTML_TAG_RE.sub(" ", raw_text).strip()
-        content = re.sub(r"\s+", " ", content)
-        if not content:
-            raise ObservationValidationError("empty content")
-        if len(content) < MIN_CONTENT_LENGTH:
-            raise ObservationValidationError(
-                f"too short ({len(content)} < {MIN_CONTENT_LENGTH}) — only long-form columns are usable"
-            )
-
-        # Image priority: first_pic field → pic field → first <img> in HTML body
-        first_pic = raw.get("first_pic") or raw.get("pic") or inline_img or ""
-        image_url_str: str | None = (
-            first_pic if first_pic and first_pic.startswith("http") else None
-        )
-        if not image_url_str:
-            raise ObservationValidationError("no image — only image-bearing posts are usable")
-
-        # xueqiu created_at is epoch milliseconds; topic items may lack it
-        created_raw = raw.get("created_at") or raw.get("timeBefore")
-        if isinstance(created_raw, (int, float)) and created_raw > 1e12:
-            posted_at = datetime.fromtimestamp(created_raw / 1000, tz=timezone.utc)
-        elif isinstance(created_raw, (int, float)) and created_raw > 0:
-            posted_at = datetime.fromtimestamp(created_raw, tz=timezone.utc)
-        else:
-            # headline items often have no timestamp — use "now" so they fall
-            # into the recent-observation window for topic clustering.
-            posted_at = datetime.now(timezone.utc)
-
-        return from_scrape_dict(
-            {
-                "author_handle": handle,
-                "content": content,
-                "posted_at": posted_at,
-                "likes": raw.get("fav_count", 0),
-                "retweets": raw.get("retweet_count", 0),
-                "replies": raw.get("reply_count", 0),
-                "impressions": raw.get("view_count"),
-                "has_image": True,           # we already required image_url above
-                "raw_url": url,
-                "image_url": image_url_str,
-            },
-            source=self.name,
-            tier=self._tier_default,  # type: ignore[arg-type]
-        )

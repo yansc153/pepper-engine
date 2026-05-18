@@ -113,12 +113,17 @@ class FutuAdapter:
                 await ctx.add_cookies(cookies)
                 page = await ctx.new_page()
                 await page.goto(self._feed_url, timeout=self._page_timeout_ms)
-                # §16.7: click 推荐 tab to force refresh.
+                # Click 推荐 tab to force refresh (user direction).
                 try:
                     await page.click("text=推荐", timeout=5000)
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("futu 推荐 click failed (continuing): %s", exc)
-                await page.wait_for_load_state("networkidle")
+                await page.wait_for_load_state("networkidle", timeout=8000)
+
+                # Scroll to trigger lazy load of more cards.
+                for _ in range(3):
+                    await page.evaluate("window.scrollBy(0, window.innerHeight * 2)")
+                    await page.wait_for_timeout(700)
 
                 # Try a sequence of selectors — futu DOM changes often, so we
                 # cast a wider net and pick the first selector that matches.
@@ -168,13 +173,29 @@ class FutuAdapter:
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
         if len(lines) < 2:
             raise ValueError("card has insufficient text")
-        handle = lines[0]
-        content = "\n".join(lines[1:6])[:1200]
-        href = await card.locator("a").first.get_attribute("href")
+        handle = lines[0][:60]
+        content = "\n".join(lines[1:])[:5000]
+
+        href = ""
+        link = card.locator("a").first
+        if await link.count() > 0:
+            href = await link.get_attribute("href") or ""
+        if href and not href.startswith("http"):
+            href = "https://q.futunn.com" + href
         if not href:
             raise ValueError("missing post url")
-        url = href if href.startswith("http") else f"https://q.futunn.com{href}"
-        img_count = await card.locator("img").count()
+
+        # Extract image src — futu uses <img> inside cards for cover images.
+        # 专栏 (column) cards always have a cover image; text-only cards do not.
+        # We use "has image" as a proxy for "is column" — text-only ones drop out
+        # naturally via the image_url requirement downstream.
+        image_url = ""
+        img = card.locator("img").first
+        if await img.count() > 0:
+            src = await img.get_attribute("src") or ""
+            if src.startswith("http"):
+                image_url = src
+
         return {
             "author_handle": handle,
             "content": content,
@@ -182,8 +203,9 @@ class FutuAdapter:
             "likes": 0,
             "retweets": 0,
             "replies": 0,
-            "has_image": img_count > 0,
-            "raw_url": url,
+            "has_image": bool(image_url),
+            "raw_url": href,
+            "image_url": image_url,
         }
 
     def _parse_posts(
@@ -191,6 +213,14 @@ class FutuAdapter:
     ) -> list[Observation]:
         out: list[Observation] = []
         for raw in raw_posts[: self._max_posts]:
+            # Image-only: 专栏 cards have cover images, plain posts don't.
+            if not raw.get("image_url"):
+                logger.debug("futu skip non-column card: %s", raw.get("raw_url"))
+                continue
+            # Length: enforce minimum content so we don't ingest tiny status posts.
+            if len((raw.get("content") or "").strip()) < 100:
+                logger.debug("futu skip short card: %s", raw.get("raw_url"))
+                continue
             try:
                 obs = from_scrape_dict(
                     raw, source=self.name, tier=self._tier_default  # type: ignore[arg-type]
